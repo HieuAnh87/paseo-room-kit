@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_paseo="/Applications/Paseo.app/Contents/Resources/bin/paseo"
+
+# Paseo's own provider lifecycle bridge may invoke this hook command. Room
+# agents otherwise use the role-aware MCP proxy, never the unrestricted CLI.
+if [[ "${1:-}" == "hooks" && "${2:-}" == "codex" ]]; then
+  exec "$real_paseo" "$@"
+fi
+
+printf 'Room authority denied: use the role-aware Paseo MCP tools; direct Paseo CLI is disabled.\\n' >&2
+exit 77

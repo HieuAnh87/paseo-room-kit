@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+import json
+import os
+import pathlib
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import tempfile
+
+ROLE_FILES = {
+    "lead": "lead.config.toml",
+    "peer": "peer.config.toml",
+    "supervisor": "supervisor.config.toml",
+}
+
+OVERRIDE_KEYS = {
+    "model",
+    "model_instructions_file",
+    "model_reasoning_effort",
+    "personality",
+    "model_verbosity",
+    "model_reasoning_summary",
+    "service_tier",
+    "sandbox_mode",
+    "approval_policy",
+    "approvals_reviewer",
+}
+
+
+def top_level_table_offset(text: str) -> int:
+    match = re.search(r"(?m)^\[", text)
+    return match.start() if match else len(text)
+
+
+def developer_block(text: str) -> str:
+    match = re.search(r'(?ms)^developer_instructions\s*=\s*""".*?^"""\s*$', text)
+    if not match:
+        return ""
+    return match.group(0).rstrip() + "\n"
+
+
+def scalar_overrides(text: str) -> dict[str, str]:
+    prefix = text[:top_level_table_offset(text)]
+    values: dict[str, str] = {}
+    for line in prefix.splitlines():
+        match = re.match(r"^([A-Za-z0-9_]+)\s*=\s*(.+)$", line)
+        if match and match.group(1) in OVERRIDE_KEYS:
+            values[match.group(1)] = match.group(2)
+    return values
+
+
+def apply_scalar_overrides(base_head: str, values: dict[str, str]) -> str:
+    lines = base_head.rstrip().splitlines()
+    seen: set[str] = set()
+    rendered: list[str] = []
+    for line in lines:
+        match = re.match(r"^([A-Za-z0-9_]+)\s*=", line)
+        if match and match.group(1) in values:
+            key = match.group(1)
+            rendered.append(f"{key} = {values[key]}")
+            seen.add(key)
+        else:
+            rendered.append(line)
+    for key, value in values.items():
+        if key not in seen:
+            rendered.append(f"{key} = {value}")
+    return "\n".join(rendered).rstrip() + "\n\n"
+
+
+def link(runtime: pathlib.Path, name: str, target: pathlib.Path) -> None:
+    path = runtime / name
+    if not target.exists() and not target.is_symlink():
+        return
+    if path.is_symlink() and pathlib.Path(os.readlink(path)) == target:
+        return
+    if path.exists() or path.is_symlink():
+        path.unlink()
+    path.symlink_to(target)
+
+
+def write_no_native_agents_model_catalog(runtime: pathlib.Path) -> pathlib.Path:
+    codex_bin = os.environ.get("CODEX_BIN") or shutil.which("codex")
+    if not codex_bin:
+        raise SystemExit("codex binary not found while building the room model catalog")
+    result = subprocess.run(
+        [codex_bin, "debug", "models", "--bundled"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    catalog = json.loads(result.stdout)
+    models = catalog.get("models")
+    if not isinstance(models, list) or not models:
+        raise SystemExit("Codex bundled model catalog contains no models")
+    for model in models:
+        if not isinstance(model, dict):
+            raise SystemExit("Codex bundled model catalog contains an invalid model")
+        model["multi_agent_version"] = None
+
+    target = runtime / "model-catalog.no-native-agents.json"
+    fd, temporary = tempfile.mkstemp(prefix="model-catalog.", suffix=".json", dir=runtime)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(catalog, stream, separators=(",", ":"))
+        stream.write("\n")
+    os.replace(temporary, target)
+    return target
+
+
+def write_role_hooks(
+    runtime: pathlib.Path,
+    role: str,
+    canonical_hooks_path: pathlib.Path,
+    guard_path: pathlib.Path,
+) -> None:
+    if canonical_hooks_path.exists():
+        value = json.loads(canonical_hooks_path.read_text())
+    else:
+        value = {"hooks": {}}
+    if not isinstance(value, dict):
+        raise SystemExit("Codex hooks config must be a JSON object")
+    hooks = value.setdefault("hooks", {})
+    if not isinstance(hooks, dict):
+        raise SystemExit("Codex hooks config must contain a hooks object")
+
+    command = f"python3 {shlex.quote(str(guard_path))} --role {shlex.quote(role)}"
+    for event in ("PreToolUse", "PostToolUse"):
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
+            raise SystemExit(f"Codex hooks event {event} must be an array")
+        groups.append(
+            {
+                "matcher": "^Bash$|^exec$|^mcp__paseo__.*$|^paseo_.*$",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": command,
+                        "statusMessage": f"Checking Paseo {role} authority...",
+                        "timeout": 10,
+                    }
+                ],
+            }
+        )
+
+    target = runtime / "hooks.json"
+    fd, temporary = tempfile.mkstemp(prefix="hooks.", suffix=".json", dir=runtime)
+    with os.fdopen(fd, "w") as stream:
+        json.dump(value, stream, indent=2)
+        stream.write("\n")
+    os.replace(temporary, target)
+
+
+def enforce_direct_paseo_tools(text: str) -> str:
+    """Keep Paseo MCP calls on Codex's hook-visible direct tool path."""
+    heading = "[features.code_mode]"
+    if heading not in text:
+        return (
+            text.rstrip()
+            + "\n\n[features.code_mode]\n"
+            + "enabled = true\n"
+            + 'direct_only_tool_namespaces = ["mcp__paseo"]\n'
+        )
+    section_start = text.index(heading)
+    next_section = re.search(r"(?m)^\[", text[section_start + len(heading) :])
+    section_end = (
+        section_start + len(heading) + next_section.start()
+        if next_section
+        else len(text)
+    )
+    section = text[section_start:section_end]
+    if re.search(r"(?m)^enabled\s*=", section):
+        section = re.sub(r"(?m)^enabled\s*=.*$", "enabled = true", section)
+    else:
+        section += "\nenabled = true\n"
+    boundary = 'direct_only_tool_namespaces = ["mcp__paseo"]'
+    if re.search(r"(?m)^direct_only_tool_namespaces\s*=", section):
+        section = re.sub(
+            r"(?m)^direct_only_tool_namespaces\s*=.*$",
+            boundary,
+            section,
+        )
+    else:
+        section += boundary + "\n"
+    return text[:section_start] + section + text[section_end:]
+
+
+def configure_role_paseo_mcp(text: str, role: str) -> str:
+    """Replace any inherited Paseo MCP with the role-aware local proxy."""
+    heading = "[mcp_servers.paseo]"
+    if heading in text:
+        section_start = text.index(heading)
+        next_section = re.search(r"(?m)^\[", text[section_start + len(heading) :])
+        section_end = (
+            section_start + len(heading) + next_section.start()
+            if next_section
+            else len(text)
+        )
+        text = text[:section_start] + text[section_end:]
+    proxy = pathlib.Path.home() / ".local/bin/paseo-room-mcp"
+    return (
+        text.rstrip()
+        + "\n\n[mcp_servers.paseo]\n"
+        + f"command = {json.dumps(str(proxy))}\n"
+        + f"args = [{json.dumps(role)}]\n"
+        + "startup_timeout_sec = 30.0\n"
+        + "tool_timeout_sec = 120.0\n"
+    )
+
+
+def remove_role_paseo_mcp(text: str) -> str:
+    heading = "[mcp_servers.paseo]"
+    if heading not in text:
+        return text
+    section_start = text.index(heading)
+    next_section = re.search(r"(?m)^\[", text[section_start + len(heading) :])
+    section_end = (
+        section_start + len(heading) + next_section.start()
+        if next_section
+        else len(text)
+    )
+    return text[:section_start] + text[section_end:]
+
+
+def main() -> None:
+    if len(sys.argv) != 2 or sys.argv[1] not in ROLE_FILES:
+        raise SystemExit(f"usage: {sys.argv[0]} <{'|'.join(ROLE_FILES)}>")
+    role = sys.argv[1]
+    home = pathlib.Path.home()
+    canonical = home / ".codex"
+    base = (canonical / "config.toml").read_text()
+    overlay = (canonical / ROLE_FILES[role]).read_text()
+    runtime = home / ".codex-runtime" / role
+    runtime.mkdir(parents=True, exist_ok=True)
+    offset = top_level_table_offset(base)
+    overrides = scalar_overrides(overlay)
+    model_catalog = write_no_native_agents_model_catalog(runtime)
+    overrides["model_catalog_json"] = json.dumps(str(model_catalog))
+    head = apply_scalar_overrides(base[:offset], overrides)
+    tail = base[offset:]
+    if role == "supervisor":
+        tail = tail.replace("generate_memories = false", "generate_memories = true")
+        tail = tail.replace("use_memories = false", "use_memories = true")
+    instructions = developer_block(overlay)
+    merged = head + (instructions + "\n" if instructions else "") + tail.lstrip()
+    merged = enforce_direct_paseo_tools(merged)
+    if role in {"supervisor", "lead"}:
+        merged = configure_role_paseo_mcp(merged, role)
+    else:
+        merged = remove_role_paseo_mcp(merged)
+
+    fd, temporary = tempfile.mkstemp(prefix="config.", suffix=".toml", dir=runtime)
+    with os.fdopen(fd, "w") as stream:
+        stream.write(merged)
+    os.replace(temporary, runtime / "config.toml")
+
+    write_role_hooks(
+        runtime,
+        role,
+        canonical / "hooks.json",
+        canonical / "hooks/room-role-guard.py",
+    )
+
+    for name in ("auth.json", "model-instructions.md", "AGENTS.md"):
+        link(runtime, name, canonical / name)
+    for name in ("skills", "plugins"):
+        link(runtime, name, canonical / name)
+
+
+if __name__ == "__main__":
+    main()

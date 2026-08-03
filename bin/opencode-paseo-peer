@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+opencode_bin="${OPENCODE_BIN:-$(command -v opencode)}"
+export OPENCODE_CONFIG="${HOME}/.config/opencode/paseo-peer.json"
+export PASEO_ROOM_ROLE="peer"
+export PATH="${HOME}/.local/share/paseo-room-bin:${PATH}"
+exec "$opencode_bin" --pure acp "$@"

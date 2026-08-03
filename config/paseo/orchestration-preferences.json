@@ -1,0 +1,20 @@
+{
+  "providers": {
+    "impl": "opencode-peer/aibox/deepseek-v4-flash",
+    "impl_deep": "codex-peer/gpt-5.6-luna",
+    "search": "codex-peer/gpt-5.6-luna",
+    "ui": "gemini-ui/gemini-3.6-flash-medium",
+    "research": "opencode-peer/aibox/deepseek-v4-flash",
+    "planning": "codex-lead/gpt-5.6-sol",
+    "audit": "codex-peer/gpt-5.6-luna"
+  },
+  "preferences": [
+    "The human-facing Supervisor must use the planning provider preference when bootstrapping the internal Lead seat; never create that Lead with the stock codex provider.",
+    "The Lead must use the impl, impl_deep, search, research, or ui provider preference when creating a bounded Peer; never create an internal Peer with the stock codex provider.",
+    "Use impl (DeepSeek V4 Flash) for normal, mechanical, isolated implementation. Use impl_deep (Codex Peer Luna) for difficult, cross-cutting, or uncertainty-heavy implementation; use audit (Codex Peer Luna) for review. For codex-peer impl_deep or audit work, request Max thinking.",
+    "Use search (Codex Peer Luna) for delegated codebase navigation/search and request Low thinking. Direct rg/GitNexus calls stay inside the current agent and do not spawn another model.",
+    "Use ui (Gemini through Antigravity ACP) for UI/design work; prefer gemini-3.6-flash-medium unless the task needs another advertised Gemini mode.",
+    "DeepSeek V4 Flash and GLM 5.2 on the AI Box provider are configured with Max thinking; do not invent an unsupported no-thinking option for them.",
+    "Verify the created agent's provider and model immediately after creation. If it is a stock provider or the wrong role provider, stop and report the routing error instead of continuing the chain."
+  ]
+}

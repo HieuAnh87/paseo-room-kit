@@ -1,0 +1,491 @@
+#!/usr/bin/env python3
+"""Role-aware stdio MCP proxy for Paseo's agent-scoped HTTP MCP server."""
+
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+import uuid
+from typing import Any
+
+
+GUARD = pathlib.Path.home() / ".codex/hooks/room-role-guard.py"
+AGENTS_ROOT = pathlib.Path.home() / ".paseo/agents"
+UPSTREAM = "http://127.0.0.1:6767/mcp/agents"
+AGENT_ID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+
+HAND_BACK_TOOL = {
+    "name": "handback_to_parent",
+    "title": "Hand back final result",
+    "description": (
+        "Lead-only: deliver one final, validated handback to the parent governance "
+        "seat after downstream callbacks are complete. The parent identity is "
+        "resolved internally and is never supplied by the Lead."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "message": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Final validated outcome, evidence, and any remaining risk.",
+            }
+        },
+        "required": ["message"],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+SUPERVISOR_BLOCKED_PREFIXES = ("browser_",)
+SUPERVISOR_BLOCKED_TOOLS = {
+    "capture_terminal",
+    "create_terminal",
+    "kill_terminal",
+    "send_terminal_keys",
+    "start_workspace_script",
+    "stop_workspace_script",
+}
+LEAD_BLOCKED_TOOLS = {
+    "archive_workspace",
+    "create_workspace",
+    "rename_workspace",
+}
+SCHEDULE_MUTATION_TOOLS = {
+    "create_schedule",
+    "delete_schedule",
+    "pause_schedule",
+    "resume_schedule",
+    "run_schedule_once",
+    "update_schedule",
+}
+
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
+    raise SystemExit(1)
+
+
+def resolve_agent_id() -> str:
+    direct = os.environ.get("PASEO_AGENT_ID", "").strip()
+    if direct:
+        return direct
+
+    # Codex intentionally filters most parent environment variables before
+    # launching stdio MCP servers. Paseo still places PASEO_AGENT_ID on the
+    # role's Codex app-server process, so walk same-user parent processes and
+    # recover only that one non-secret identity field.
+    pid = os.getppid()
+    for _ in range(8):
+        if pid <= 1:
+            break
+        try:
+            process = subprocess.run(
+                ["ps", "eww", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=3,
+            )
+            match = re.search(r"(?:^|\s)PASEO_AGENT_ID=([^\s]+)", process.stdout)
+            if match:
+                return match.group(1)
+            parent = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "ppid="],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=3,
+            ).stdout.strip()
+            pid = int(parent)
+        except (OSError, ValueError, subprocess.SubprocessError):
+            break
+    return ""
+
+
+def read_message() -> dict[str, Any] | None:
+    first = sys.stdin.buffer.readline()
+    if not first:
+        return None
+    if first.lower().startswith(b"content-length:"):
+        try:
+            length = int(first.split(b":", 1)[1].strip())
+        except ValueError:
+            fail("Invalid MCP Content-Length header")
+        while True:
+            header = sys.stdin.buffer.readline()
+            if header in (b"\n", b"\r\n", b""):
+                break
+        raw = sys.stdin.buffer.read(length)
+    else:
+        raw = first.strip()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        fail(f"Invalid MCP JSON: {error}")
+    if not isinstance(value, dict):
+        fail("MCP message must be a JSON object")
+    return value
+
+
+def write_message(value: dict[str, Any]) -> None:
+    sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
+    sys.stdout.flush()
+
+
+def error_response(request_id: Any, code: int, message: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
+def denied_tool_result(request_id: Any, reason: str) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {
+            "content": [{"type": "text", "text": f"Room authority denied: {reason}"}],
+            "isError": True,
+        },
+    }
+
+
+def text_tool_result(
+    request_id: Any,
+    text: str,
+    *,
+    is_error: bool = False,
+) -> dict[str, Any]:
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {
+            "content": [{"type": "text", "text": text}],
+            "isError": is_error,
+        },
+    }
+
+
+def load_agent_record(agent_id: str) -> dict[str, Any] | None:
+    if not AGENT_ID_PATTERN.fullmatch(agent_id):
+        return None
+    matches = list(AGENTS_ROOT.glob(f"*/{agent_id}.json"))
+    if len(matches) != 1:
+        return None
+    try:
+        value = json.loads(matches[0].read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) and value.get("id") == agent_id else None
+
+
+def upstream_call(agent_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    url = f"{UPSTREAM}?callerAgentId={agent_id}"
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, separators=(",", ":")).encode(),
+        headers={
+            "content-type": "application/json",
+            "accept": "application/json, text/event-stream",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read().decode()
+    except (urllib.error.URLError, TimeoutError) as error:
+        raise RuntimeError(f"Paseo MCP upstream unavailable: {error}") from error
+    if not body.strip():
+        return None
+    content_type = response.headers.get("content-type", "")
+    if "text/event-stream" in content_type:
+        messages = []
+        for line in body.splitlines():
+            if not line.startswith("data:"):
+                continue
+            with_data = line.split(":", 1)[1].strip()
+            if with_data:
+                messages.append(json.loads(with_data))
+        if not messages:
+            return None
+        request_id = payload.get("id")
+        for message in messages:
+            if message.get("id") == request_id:
+                return message
+        return messages[-1]
+    value = json.loads(body)
+    return value if isinstance(value, dict) else None
+
+
+def allowed_tool(role: str, name: str) -> bool:
+    if role == "peer":
+        return False
+    if name in SCHEDULE_MUTATION_TOOLS:
+        return False
+    if role == "supervisor":
+        if name.startswith(SUPERVISOR_BLOCKED_PREFIXES):
+            return False
+        if name in SUPERVISOR_BLOCKED_TOOLS:
+            return False
+    if role == "lead" and name in LEAD_BLOCKED_TOOLS:
+        return False
+    return True
+
+
+def run_guard(
+    role: str,
+    event: str,
+    agent_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    tool_use_id: str,
+    response: Any = None,
+) -> tuple[bool, str | None, dict[str, Any]]:
+    payload: dict[str, Any] = {
+        "hook_event_name": event,
+        "tool_name": f"mcp__paseo__{tool_name}",
+        "tool_input": arguments,
+        "tool_use_id": tool_use_id,
+    }
+    if event == "PostToolUse":
+        payload["tool_response"] = response
+    environment = {
+        **os.environ,
+        "PASEO_AGENT_ID": agent_id,
+        "PASEO_ROOM_ROLE": role,
+    }
+    completed = subprocess.run(
+        ["python3", str(GUARD), "--role", role],
+        input=json.dumps(payload),
+        text=True,
+        capture_output=True,
+        env=environment,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        return False, f"room guard failed: {completed.stderr.strip()}", arguments
+    if not completed.stdout.strip():
+        return True, None, arguments
+    try:
+        output = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return False, "room guard returned invalid JSON", arguments
+    specific = output.get("hookSpecificOutput", {})
+    if specific.get("permissionDecision") == "deny":
+        return False, specific.get("permissionDecisionReason", "denied"), arguments
+    updated = specific.get("updatedInput")
+    return True, None, updated if isinstance(updated, dict) else arguments
+
+
+def list_tools(agent_id: str, role: str, request_id: Any) -> dict[str, Any]:
+    response = upstream_call(
+        agent_id,
+        {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": {}},
+    )
+    if not response or "result" not in response:
+        return error_response(request_id, -32603, "Paseo MCP returned no tool catalog")
+    result = response.get("result")
+    tools = result.get("tools") if isinstance(result, dict) else None
+    if not isinstance(tools, list):
+        return error_response(request_id, -32603, "Paseo MCP returned an invalid tool catalog")
+    filtered = [
+        item
+        for item in tools
+        if isinstance(item, dict)
+        and isinstance(item.get("name"), str)
+        and allowed_tool(role, item["name"])
+    ]
+    if role == "lead":
+        filtered.append(HAND_BACK_TOOL)
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {"tools": filtered},
+    }
+
+
+def handback_to_parent(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role != "lead":
+        return denied_tool_result(request_id, "only Lead can hand back to a parent seat")
+    if set(arguments) != {"message"}:
+        return error_response(request_id, -32602, "handback requires only message")
+    message = arguments.get("message")
+    if not isinstance(message, str) or not message.strip():
+        return error_response(request_id, -32602, "handback message must be non-empty")
+
+    lead = load_agent_record(agent_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+    if (
+        not isinstance(labels, dict)
+        or labels.get("role") != "lead"
+        or lead.get("archivedAt") is not None
+    ):
+        return denied_tool_result(request_id, "caller is not an active Lead seat")
+
+    parent_id = labels.get("paseo.parent-agent-id")
+    parent = load_agent_record(parent_id) if isinstance(parent_id, str) else None
+    parent_labels = parent.get("labels") if isinstance(parent, dict) else None
+    parent_is_supervisor = (
+        isinstance(parent_labels, dict)
+        and parent_labels.get("role") == "supervisor"
+    ) or (
+        isinstance(parent, dict)
+        and parent.get("provider") == "codex-supervisor"
+    )
+    if (
+        not parent_is_supervisor
+        or parent.get("archivedAt") is not None
+    ):
+        return denied_tool_result(request_id, "active parent governance seat not found")
+
+    response = upstream_call(
+        agent_id,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "send_agent_prompt",
+                "arguments": {
+                    "agentId": parent_id,
+                    "prompt": f"Final Lead handback:\n\n{message.strip()}",
+                    "background": True,
+                    "notifyOnFinish": False,
+                },
+            },
+        },
+    )
+    if not response or "error" in response:
+        return text_tool_result(
+            request_id,
+            "Final handback could not be delivered to the parent governance seat.",
+            is_error=True,
+        )
+    result = response.get("result")
+    if isinstance(result, dict) and result.get("isError"):
+        return text_tool_result(
+            request_id,
+            "Final handback was rejected by the parent governance seat.",
+            is_error=True,
+        )
+    return text_tool_result(request_id, "Final handback delivered to parent governance seat.")
+
+
+def call_tool(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    name = params.get("name")
+    arguments = params.get("arguments", {})
+    if not isinstance(name, str) or not isinstance(arguments, dict):
+        return error_response(request_id, -32602, "tools/call requires name and object arguments")
+    if name == HAND_BACK_TOOL["name"]:
+        return handback_to_parent(agent_id, role, request_id, arguments)
+    if not allowed_tool(role, name):
+        return denied_tool_result(request_id, f"{role} cannot call Paseo tool {name}")
+
+    tool_use_id = f"proxy-{uuid.uuid4()}"
+    allowed, reason, guarded_arguments = run_guard(
+        role,
+        "PreToolUse",
+        agent_id,
+        name,
+        arguments,
+        tool_use_id,
+    )
+    if not allowed:
+        return denied_tool_result(request_id, reason or "denied")
+
+    response = upstream_call(
+        agent_id,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": guarded_arguments},
+        },
+    )
+    if response is None:
+        response = error_response(request_id, -32603, "Paseo MCP returned no response")
+    run_guard(
+        role,
+        "PostToolUse",
+        agent_id,
+        name,
+        guarded_arguments,
+        tool_use_id,
+        response,
+    )
+    return response
+
+
+def handle(agent_id: str, role: str, request: dict[str, Any]) -> dict[str, Any] | None:
+    method = request.get("method")
+    request_id = request.get("id")
+    if method == "initialize":
+        params = request.get("params")
+        version = params.get("protocolVersion") if isinstance(params, dict) else None
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": version or "2025-06-18",
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": f"paseo-room-{role}", "version": "1.1.0"},
+            },
+        }
+    if method == "notifications/initialized":
+        return None
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": request_id, "result": {}}
+    if method == "tools/list":
+        return list_tools(agent_id, role, request_id)
+    if method == "tools/call":
+        params = request.get("params")
+        if not isinstance(params, dict):
+            return error_response(request_id, -32602, "tools/call params must be an object")
+        return call_tool(agent_id, role, request_id, params)
+    if request_id is None:
+        return None
+    return error_response(request_id, -32601, f"Method not found: {method}")
+
+
+def main() -> None:
+    if len(sys.argv) != 2 or sys.argv[1] not in {"supervisor", "lead", "peer"}:
+        fail("usage: paseo-room-mcp supervisor|lead|peer")
+    role = sys.argv[1]
+    agent_id = resolve_agent_id()
+    if not agent_id:
+        fail("PASEO_AGENT_ID is required")
+    while True:
+        request = read_message()
+        if request is None:
+            return
+        try:
+            response = handle(agent_id, role, request)
+        except Exception as error:
+            response = error_response(request.get("id"), -32603, str(error))
+        if response is not None:
+            write_message(response)
+
+
+if __name__ == "__main__":
+    main()

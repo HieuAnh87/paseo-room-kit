@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+role="${1:?room role is required}"
+shift
+
+"${HOME}/.local/bin/codex-room-sync" "$role"
+export CODEX_HOME="${HOME}/.codex-runtime/${role}"
+export PASEO_ROOM_ROLE="$role"
+export PATH="${HOME}/.local/share/paseo-room-bin:${PATH}"
+codex_bin="${CODEX_BIN:-$(command -v codex)}"
+exec "$codex_bin" "$@"

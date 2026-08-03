@@ -1,0 +1,311 @@
+{
+  "version": 1,
+  "daemon": {
+    "listen": "127.0.0.1:6767",
+    "mcp": {
+      "enabled": true,
+      "injectIntoAgents": false
+    },
+    "browserTools": {
+      "enabled": true
+    },
+    "autoArchiveAfterMerge": false,
+    "enableTerminalAgentHooks": true,
+    "appendSystemPrompt": "",
+    "cors": {
+      "allowedOrigins": [
+        "https://app.paseo.sh"
+      ]
+    },
+    "relay": {
+      "enabled": true
+    }
+  },
+  "app": {
+    "baseUrl": "https://app.paseo.sh"
+  },
+  "agents": {
+    "providers": {
+      "omp": {
+        "enabled": false
+      },
+      "pi": {
+        "enabled": false
+      },
+      "copilot": {
+        "enabled": false
+      },
+      "claude": {
+        "env": {
+          "CLAUDE_CONFIG_DIR": "{{HOME}}/.claude-paseo-peer"
+        },
+        "enabled": true
+      },
+      "codex-supervisor": {
+        "extends": "codex",
+        "label": "Codex Supervisor",
+        "description": "Project-owner assistant for cross-workspace supervision and operations",
+        "command": [
+          "{{HOME}}/.local/bin/codex-room",
+          "supervisor"
+        ],
+        "models": [
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              },
+              {
+                "id": "ultra",
+                "label": "Ultra"
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-luna",
+            "label": "Luna",
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "codex-lead": {
+        "extends": "codex",
+        "label": "Codex Lead",
+        "description": "Lead profile for owner-led engineering rooms and peer consultation",
+        "command": [
+          "{{HOME}}/.local/bin/codex-room",
+          "lead"
+        ],
+        "models": [
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              },
+              {
+                "id": "ultra",
+                "label": "Ultra"
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-luna",
+            "label": "Luna",
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "codex-peer": {
+        "extends": "codex",
+        "label": "Codex Peer",
+        "description": "Bounded engineering peer with independent task-local judgment",
+        "command": [
+          "{{HOME}}/.local/bin/codex-room",
+          "peer"
+        ],
+        "models": [
+          {
+            "id": "gpt-5.6-sol",
+            "label": "Sol",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              },
+              {
+                "id": "ultra",
+                "label": "Ultra"
+              }
+            ]
+          },
+          {
+            "id": "gpt-5.6-luna",
+            "label": "Luna",
+            "thinkingOptions": [
+              {
+                "id": "low",
+                "label": "Low"
+              },
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              }
+            ]
+          }
+        ]
+      },
+      "opencode-peer": {
+        "extends": "acp",
+        "label": "OpenCode Peer",
+        "description": "OpenCode worker without provider-side orchestration",
+        "command": [
+          "{{HOME}}/.local/bin/opencode-paseo-peer"
+        ],
+        "models": [
+          {
+            "id": "aibox/deepseek-v4-flash",
+            "label": "DeepSeek V4 Flash · AI Box",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          },
+          {
+            "id": "aibox/glm-5.2",
+            "label": "GLM 5.2 · AI Box",
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "gemini-ui": {
+        "extends": "acp",
+        "label": "Gemini UI · Antigravity ACP",
+        "description": "Gemini UI/design peer through the Antigravity ACP bridge",
+        "params": {
+          "supportsMcpServers": false
+        },
+        "command": [
+          "{{ANTIGRAVITY_ACP_BINARY}}"
+        ],
+        "models": [
+          {
+            "id": "gemini-3.6-flash-medium",
+            "label": "Gemini 3.6 Flash · Medium",
+            "isDefault": true
+          },
+          {
+            "id": "gemini-3.6-flash-low",
+            "label": "Gemini 3.6 Flash · Low"
+          },
+          {
+            "id": "gemini-3.6-flash-high",
+            "label": "Gemini 3.6 Flash · High"
+          },
+          {
+            "id": "gemini-3.5-flash-medium",
+            "label": "Gemini 3.5 Flash · Medium"
+          },
+          {
+            "id": "gemini-3.5-flash-low",
+            "label": "Gemini 3.5 Flash · Low"
+          },
+          {
+            "id": "gemini-3.5-flash-high",
+            "label": "Gemini 3.5 Flash · High"
+          },
+          {
+            "id": "gemini-3.1-pro-low",
+            "label": "Gemini 3.1 Pro · Low"
+          },
+          {
+            "id": "gemini-3.1-pro-high",
+            "label": "Gemini 3.1 Pro · High"
+          }
+        ]
+      }
+    }
+  },
+  "features": {
+    "dictation": {
+      "enabled": false
+    },
+    "voiceMode": {
+      "enabled": false
+    }
+  }
+}
