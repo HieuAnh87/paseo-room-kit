@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+role="${1:?room role is required}"
+shift
+
+case "$role" in
+  supervisor) ;;
+  *)
+    printf 'unsupported Claude room role: %s\n' "$role" >&2
+    exit 2
+    ;;
+esac
+
+claude_bin="${CLAUDE_BIN:-$(command -v claude)}"
+role_root="${HOME}/.config/claude-room/${role}"
+
+export PASEO_ROOM_ROLE="$role"
+export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+export PATH="${HOME}/.local/share/paseo-room-bin:${PATH}"
+
+exec "$claude_bin" \
+  --append-system-prompt-file "${role_root}/instructions.md" \
+  --settings "${role_root}/settings.json" \
+  --mcp-config "${role_root}/mcp.json" \
+  --strict-mcp-config \
+  --disable-slash-commands \
+  --no-chrome \
+  "$@"

@@ -64,6 +64,13 @@ class PortabilityTest(unittest.TestCase):
         value = json.loads(paseo)
         self.assertTrue(value["daemon"]["mcp"]["enabled"])
         self.assertFalse(value["daemon"]["mcp"]["injectIntoAgents"])
+        claude_supervisor = value["agents"]["providers"]["claude-supervisor"]
+        self.assertEqual(claude_supervisor["extends"], "claude")
+        self.assertEqual(
+            claude_supervisor["models"][0]["id"],
+            "claude-opus-4-8",
+        )
+        self.assertIn("Agent", claude_supervisor["disallowedTools"])
 
         for role in ("supervisor", "lead", "peer"):
             text = (
@@ -72,12 +79,21 @@ class PortabilityTest(unittest.TestCase):
             self.assertNotIn("{{", text)
             tomllib.loads(text)
 
+        for name in ("instructions.md", "settings.json", "mcp.json"):
+            text = (
+                ROOT / f"config/claude/supervisor.{name}.tmpl"
+            ).read_text().replace("{{HOME}}", str(home))
+            self.assertNotIn("{{", text)
+            if name.endswith(".json"):
+                json.loads(text)
+
     def test_runtime_state_templates_are_empty(self) -> None:
         leases = json.loads((ROOT / "templates/lead-leases.empty.json").read_text())
         self.assertEqual(leases, {"version": 1, "leases": {}})
 
     def test_expected_executables_are_marked_executable(self) -> None:
         paths = [
+            ROOT / "bin/claude-room",
             ROOT / "bin/codex-room",
             ROOT / "bin/codex-room-sync",
             ROOT / "bin/paseo-room-mcp",

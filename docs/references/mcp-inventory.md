@@ -27,6 +27,7 @@ Nguồn: `~/.codex/config.toml`. Giá trị secret/env/auth không được ché
 
 | Consumer | Paseo control MCP | Codex baseline MCP |
 |---|---:|---:|
+| `claude-supervisor` | yes, qua role proxy explicit | no; Claude settings/MCP được isolate bằng wrapper |
 | `codex-supervisor` | yes, qua role proxy | yes, via role runtime baseline |
 | `codex-lead` | yes, qua role proxy | yes, via role runtime baseline |
 | `codex-peer` | no | baseline is materialized by `codex-room-sync` |

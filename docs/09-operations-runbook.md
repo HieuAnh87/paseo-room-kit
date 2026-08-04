@@ -22,6 +22,7 @@ Nếu đang mở nhầm một stock `codex` chat, không dùng chat đó để g
 paseo status
 paseo provider ls
 paseo provider models codex-supervisor
+paseo provider models claude-supervisor
 paseo provider models codex-lead
 paseo provider models codex-peer
 paseo provider models opencode-peer
@@ -45,7 +46,7 @@ paseo logs <lead-id>
 Kiểm tra tối thiểu:
 
 ```text
-Supervisor: provider starts codex-supervisor/
+Supervisor: provider starts codex-supervisor/ hoặc claude-supervisor/
 Lead: provider starts codex-lead/
 Peer: provider starts codex-peer/, opencode-peer/ hoặc gemini-ui/
 ParentAgentId: đúng owner

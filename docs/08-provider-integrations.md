@@ -20,13 +20,20 @@ Cả hai hiện khai báo thinking `max`. OpenCode native provider vẫn tồn t
 
 ## Claude
 
-`claude` đang enabled trong Paseo config và dùng:
+`claude` built-in vẫn enabled cho direct/manual use và dùng auth/config mặc
+định của Claude Code. Orchestration có thêm provider:
 
 ```text
-CLAUDE_CONFIG_DIR=$HOME/.claude-paseo-peer
+claude-supervisor
+  → ~/.local/bin/claude-room supervisor
+  → Claude Opus 4.8
+  → explicit Supervisor instructions/settings/Paseo MCP
 ```
 
-Claude hiện chưa được map vào các category orchestration mặc định. Nó vẫn có thể được dùng manually hoặc được thêm vào preference khi Human chốt một use case cụ thể. Không coi “available” là “được phép tự động chọn trong chain”.
+`claude-supervisor` là Human-facing front door song song, không phải category
+Peer và không thay `planning` preference. Wrapper dùng strict MCP config, chặn
+native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa mọi
+delegation qua Paseo. Lead phía dưới vẫn là `codex-lead/gpt-5.6-sol`.
 
 ## Gemini qua `antigravity-acp`
 
@@ -64,7 +71,8 @@ Local installation:
 | hard implementation/review | `codex-peer/gpt-5.6-luna` |
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
-| direct interactive Claude | built-in `claude`, không tự đưa vào chain nếu chưa có preference |
+| governance Supervisor thử nghiệm | `claude-supervisor/claude-opus-4-8` |
+| direct interactive Claude | built-in `claude`, không tự đưa vào Peer route |
 
 ## Auth/config boundary
 

@@ -24,6 +24,13 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 - Luna: Max.
 - Mục đích: governance/front door; không dùng model choice để nhận engineering ownership.
 
+### `claude-supervisor`
+
+- Opus 4.8: Medium mặc định, High hoặc Max cho governance khó.
+- Là front door song song để thử nghiệm, không thay `planning` route.
+- Vẫn bootstrap `codex-lead/gpt-5.6-sol`; không dùng Claude native Agent/Task.
+- Chỉ nhận Paseo control MCP qua role proxy explicit.
+
 ### `codex-lead`
 
 - Sol: Low, Medium, High, XHigh, Max, Ultra; Medium là default.

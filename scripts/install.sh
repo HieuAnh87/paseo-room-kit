@@ -83,6 +83,10 @@ for role in supervisor lead peer; do
   install_file "${repo_root}/config/codex/${role}.config.toml.tmpl" \
     "${target_home}/.codex/${role}.config.toml" 644 render
 done
+for asset in instructions.md settings.json mcp.json; do
+  install_file "${repo_root}/config/claude/supervisor.${asset}.tmpl" \
+    "${target_home}/.config/claude-room/supervisor/${asset}" 600 render
+done
 install_file "${repo_root}/config/codex/model-instructions.md" \
   "${target_home}/.codex/model-instructions.md" 644
 install_if_missing "${repo_root}/templates/codex-config.minimal.toml" \
@@ -93,7 +97,7 @@ install_file "${repo_root}/hooks/room-role-guard.py" \
 install_file "${repo_root}/hooks/test-room-role-guard.py" \
   "${target_home}/.codex/hooks/test-room-role-guard.py" 644
 
-for executable in codex-room codex-room-sync paseo-room-mcp opencode-paseo-peer; do
+for executable in claude-room codex-room codex-room-sync paseo-room-mcp opencode-paseo-peer; do
   install_file "${repo_root}/bin/${executable}" \
     "${target_home}/.local/bin/${executable}" 755
 done

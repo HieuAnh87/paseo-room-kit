@@ -94,7 +94,7 @@ Thêm Lead-only `handback_to_parent` trong role proxy. Tool:
 
 - không nhận Supervisor ID;
 - resolve exact parent từ `paseo.parent-agent-id`;
-- chỉ chấp nhận parent active có `role=supervisor` hoặc canonical provider `codex-supervisor`;
+- chỉ chấp nhận parent active có `role=supervisor` hoặc canonical provider `codex-supervisor`/`claude-supervisor`;
 - gửi final report background với reverse notification tắt;
 - không xuất hiện cho Supervisor/Peer.
 

@@ -21,6 +21,7 @@ Paseo daemon là control plane của agent lifecycle. Các CLI bên dưới là 
 
 ```text
 Paseo daemon
+  ├── claude-supervisor → claude-room supervisor → Claude Opus runtime
   ├── codex-supervisor → codex-room supervisor → Codex runtime
   ├── codex-lead       → codex-room lead       → Codex runtime
   ├── codex-peer       → codex-room peer       → Codex runtime

@@ -31,6 +31,7 @@ python3 -m py_compile \
   "${repo_root}/bin/paseo-room-mcp" \
   "${repo_root}/scripts/render_template.py" || failures=$((failures + 1))
 bash -n \
+  "${repo_root}/bin/claude-room" \
   "${repo_root}/bin/codex-room" \
   "${repo_root}/bin/opencode-paseo-peer" \
   "${repo_root}/bin/paseo-room-deny" \
@@ -39,7 +40,7 @@ bash -n \
 python3 "${repo_root}/hooks/test-room-role-guard.py" || failures=$((failures + 1))
 
 if [[ "$mode" == "--preflight" || "$mode" == "--live" ]]; then
-  for command in git jq python3 rg paseo codex; do
+  for command in git jq python3 rg paseo claude codex; do
     check_command "$command"
   done
   for optional in bun opencode; do

@@ -6,6 +6,7 @@ Install and authenticate these tools independently:
 
 - Paseo Desktop/CLI;
 - Codex CLI;
+- Claude Code, authenticated with `claude auth status`;
 - Python 3.11+;
 - Git and `jq`;
 - OpenCode and Bun when using the AI Box/OpenCode routes;

@@ -15,6 +15,7 @@ The repository contains role profiles, provider routing, the role-aware Paseo MC
 - Lead is the sole engineering owner inside one project workspace.
 - Peer performs one bounded assignment and returns evidence to Lead.
 - Supervisor and Lead receive the role-aware Paseo MCP proxy.
+- The Human can choose either the Codex Supervisor or the isolated Claude Opus Supervisor front door.
 - Peer receives no Paseo control MCP.
 - Final Lead result uses `handback_to_parent`; Lead never supplies a Supervisor ID.
 - Native runtime state such as `idle` or `DONE` is not engineering acceptance.
@@ -34,6 +35,11 @@ Read [MIGRATION.md](MIGRATION.md), then:
 ```
 
 The installer never restarts Paseo. Restart the daemon only after reviewing the rendered config, confirming there is no active agent work, and explicitly choosing to do so.
+
+After the restart, `claude-supervisor/claude-opus-4-8` is available as a
+parallel Human-facing front door. It keeps the existing
+`codex-lead/gpt-5.6-sol` planning route; selecting Claude does not transfer
+engineering ownership into the Supervisor.
 
 ## Existing-machine update
 

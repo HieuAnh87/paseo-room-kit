@@ -36,10 +36,45 @@
         "enabled": false
       },
       "claude": {
-        "env": {
-          "CLAUDE_CONFIG_DIR": "{{HOME}}/.claude-paseo-peer"
-        },
         "enabled": true
+      },
+      "claude-supervisor": {
+        "extends": "claude",
+        "label": "Claude Opus Supervisor",
+        "description": "Human-facing governance Supervisor using Claude Opus",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "supervisor"
+        ],
+        "env": {
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task"
+        ],
+        "models": [
+          {
+            "id": "claude-opus-4-8",
+            "label": "Opus 4.8",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              },
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              }
+            ]
+          }
+        ]
       },
       "codex-supervisor": {
         "extends": "codex",

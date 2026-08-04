@@ -130,7 +130,7 @@ Lead phải gọi `handback_to_parent` sau validation. Nếu tool báo không t�
 
 1. xác nhận Lead có label `paseo.parent-agent-id`;
 2. xác nhận parent chưa archive;
-3. parent mới nên có `role=supervisor`; Supervisor legacy được nhận bằng provider canonical `codex-supervisor`;
+3. parent mới nên có `role=supervisor`; Supervisor legacy được nhận bằng provider canonical `codex-supervisor` hoặc `claude-supervisor`;
 4. reload riêng Lead để stdio MCP process nạp proxy mới; không cần restart toàn daemon;
 5. chỉ retry khi lần trước được xác nhận chưa deliver.
 
