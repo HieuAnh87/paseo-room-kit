@@ -5,6 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mode="${1:---repo}"
 target_home="${PASEO_KIT_HOME:-${HOME}}"
 failures=0
+export PYTHONDONTWRITEBYTECODE=1
 
 pass() { printf 'PASS %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
@@ -25,12 +26,15 @@ esac
 
 python3 "${repo_root}/tests/test_portability.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_proxy_handback.py" || failures=$((failures + 1))
-python3 -m py_compile \
+python3 "${repo_root}/tests/test_public_export.py" || failures=$((failures + 1))
+python3 -c 'import pathlib, sys; [compile(path.read_text(), str(path), "exec") for path in map(pathlib.Path, sys.argv[1:])]' \
   "${repo_root}/hooks/room-role-guard.py" \
   "${repo_root}/hooks/test-room-role-guard.py" \
   "${repo_root}/bin/codex-room-sync" \
   "${repo_root}/bin/paseo-room-mcp" \
-  "${repo_root}/scripts/render_template.py" || failures=$((failures + 1))
+  "${repo_root}/scripts/render_template.py" \
+  "${repo_root}/scripts/export_public_kit.py" \
+  "${repo_root}/scripts/check_public_artifact.py" || failures=$((failures + 1))
 bash -n \
   "${repo_root}/bin/claude-room" \
   "${repo_root}/bin/codex-room" \

@@ -68,4 +68,25 @@ Runtime state files such as `lead-leases.json` and `SUPERVISOR_NOTEBOOK.md` are 
 ./scripts/doctor.sh --repo
 ```
 
+## Public export
+
+The repository contains a separately reviewed candidate under `public-export/`.
+It exports the reusable launchers, role configuration, hooks, protocols,
+templates, installers, validation scripts, and tests, with public overlays for
+the top-level docs. Export it to a new or empty directory, then scan the
+result:
+
+```bash
+python3 scripts/export_public_kit.py /tmp/public-room-kit
+python3 scripts/check_public_artifact.py /tmp/public-room-kit
+```
+
+The exporter uses an explicit file allowlist, preserves executable modes, and
+does not copy runtime, session, audit, history, inventory, or notebook
+material. It refuses traversal, symlinks, binaries, duplicate destinations,
+missing/non-regular sources, and unsafe or non-empty destinations. The output
+manifest enumerates every exported file. See the candidate's
+[`MIGRATION.md`](public-export/MIGRATION.md) for a fresh-history workflow; the
+exporter does not initialize a repository, change remotes, or push.
+
 Detailed architecture and operations notes are under [docs/](docs/README.md). Version pins are recorded in [versions.lock.json](versions.lock.json).
