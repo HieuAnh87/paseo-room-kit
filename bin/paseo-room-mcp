@@ -337,6 +337,8 @@ def handback_to_parent(
         or lead.get("archivedAt") is not None
     ):
         return denied_tool_result(request_id, "caller is not an active Lead seat")
+    if labels.get("task_state") == "HANDBACK_READY":
+        return denied_tool_result(request_id, "final handback was already delivered")
 
     parent_id = labels.get("paseo.parent-agent-id")
     parent = load_agent_record(parent_id) if isinstance(parent_id, str) else None
@@ -384,7 +386,37 @@ def handback_to_parent(
             "Final handback was rejected by the parent governance seat.",
             is_error=True,
         )
-    return text_tool_result(request_id, "Final handback delivered to parent governance seat.")
+    updated_labels = dict(labels)
+    updated_labels["task_state"] = "HANDBACK_READY"
+    label_response = upstream_call(
+        agent_id,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "update_agent",
+                "arguments": {
+                    "agentId": agent_id,
+                    "labels": updated_labels,
+                },
+            },
+        },
+    )
+    label_result = label_response.get("result") if isinstance(label_response, dict) else None
+    if (
+        not isinstance(label_response, dict)
+        or "error" in label_response
+        or isinstance(label_result, dict) and label_result.get("isError")
+    ):
+        return text_tool_result(
+            request_id,
+            "Final handback delivered, but Lead lifecycle state could not be updated.",
+        )
+    return text_tool_result(
+        request_id,
+        "Final handback delivered; Lead is now HANDBACK_READY.",
+    )
 
 
 def call_tool(

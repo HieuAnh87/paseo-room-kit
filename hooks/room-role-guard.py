@@ -48,6 +48,7 @@ TARGET_MUTATIONS = {
     "set_agent_mode",
     "update_agent",
 }
+WORKSPACE_MUTATIONS = {"archive_workspace"}
 
 DIRECT_PASEO_MUTATION_RE = re.compile(
     r"""(?ix)
@@ -75,7 +76,7 @@ ANY_PASEO_COMMAND_RE = re.compile(
 )
 
 EXEC_PASEO_CALL_RE = re.compile(r"\btools\s*\.\s*mcp__paseo__([A-Za-z0-9_]+)\s*\(")
-EXEC_SENSITIVE_NAMES = {"create_agent", *TARGET_MUTATIONS}
+EXEC_SENSITIVE_NAMES = {"create_agent", *TARGET_MUTATIONS, *WORKSPACE_MUTATIONS}
 
 
 def parse_args() -> argparse.Namespace:
@@ -483,6 +484,7 @@ def reserve_lead_lease(
 ) -> None:
     now = utc_now()
     with locked_leases() as registry:
+        reconcile_archived_leases(registry, now)
         leases = registry["leases"]
         existing = leases.get(workspace_id)
         if isinstance(existing, dict):
@@ -662,6 +664,17 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
         deny(f"Target {target} is not owned by the current {role} seat.")
 
 
+def guard_workspace_mutation(role: str, tool_name: str, tool_input: dict[str, Any]) -> None:
+    if role != "supervisor":
+        deny(f"Only Supervisor can call Paseo workspace mutation {tool_name}.")
+    workspace_id = tool_input.get("workspaceId")
+    if not isinstance(workspace_id, str) or not workspace_id:
+        deny(f"{tool_name} requires an explicit workspaceId.")
+    caller = find_agent(current_agent_id())
+    if caller and caller.get("workspaceId") == workspace_id:
+        deny("Supervisor cannot archive its own active workspace.")
+
+
 def guard_bash(role: str, tool_input: dict[str, Any]) -> None:
     command = tool_input.get("command")
     if not isinstance(command, str):
@@ -695,6 +708,8 @@ def guard_exec(role: str, hook_input: dict[str, Any], raw_tool_input: Any) -> No
             guard_nested_create_agent(role, hook_input, tool_input)
         elif tool_name in TARGET_MUTATIONS:
             guard_target_mutation(role, tool_name, tool_input)
+        elif tool_name in WORKSPACE_MUTATIONS:
+            guard_workspace_mutation(role, tool_name, tool_input)
 
 
 def recursive_find(value: Any, key: str) -> Any:
@@ -725,7 +740,7 @@ def recursive_find(value: Any, key: str) -> Any:
 
 def response_failed(value: Any) -> bool:
     if isinstance(value, dict):
-        if value.get("isError") is True:
+        if value.get("isError") is True or "error" in value:
             return True
         return any(response_failed(child) for child in value.values())
     if isinstance(value, list):
@@ -771,6 +786,43 @@ def release_lead_lease(hook_input: dict[str, Any]) -> None:
             lease["released_at"] = isoformat(utc_now())
 
 
+def reconcile_archived_leases(
+    registry: dict[str, Any],
+    now: dt.datetime | None = None,
+) -> None:
+    released_at = isoformat(now or utc_now())
+    for lease in registry["leases"].values():
+        if not isinstance(lease, dict) or lease.get("state") != "active":
+            continue
+        lead_id = lease.get("lead_agent_id")
+        record = find_agent(lead_id if isinstance(lead_id, str) else None)
+        if not record or not record.get("archivedAt"):
+            continue
+        lease["state"] = "released"
+        lease["released_at"] = released_at
+        lease["release_reason"] = "archived_agent_reconciled"
+
+
+def release_workspace_leases(hook_input: dict[str, Any]) -> None:
+    response = hook_input.get("tool_response")
+    if response_failed(response):
+        return
+    tool_input = hook_input.get("tool_input")
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    workspace_id = tool_input.get("workspaceId")
+    if not isinstance(workspace_id, str):
+        return
+    now = utc_now()
+    with locked_leases() as registry:
+        reconcile_archived_leases(registry, now)
+        lease = registry["leases"].get(workspace_id)
+        if not isinstance(lease, dict) or lease.get("state") not in {"pending", "active"}:
+            return
+        lease["state"] = "released"
+        lease["released_at"] = isoformat(now)
+        lease["release_reason"] = "workspace_archived"
+
+
 def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
     raw_tool_name = hook_input.get("tool_name")
     tool_name = raw_tool_name if isinstance(raw_tool_name, str) else ""
@@ -793,6 +845,8 @@ def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
         guard_create_agent(role, hook_input, tool_input)
     if paseo_name in TARGET_MUTATIONS:
         guard_target_mutation(role, paseo_name, tool_input)
+    if paseo_name in WORKSPACE_MUTATIONS:
+        guard_workspace_mutation(role, paseo_name, tool_input)
 
 
 def handle_post(role: str, hook_input: dict[str, Any]) -> None:
@@ -813,12 +867,16 @@ def handle_post(role: str, hook_input: dict[str, Any]) -> None:
             finalize_lead_lease(nested_hook_input)
         elif nested_name in {"archive_agent", "kill_agent"}:
             release_lead_lease(nested_hook_input)
+        elif nested_name == "archive_workspace":
+            release_workspace_leases(nested_hook_input)
         return
     tool_name = paseo_tool_name(raw_tool_name)
     if tool_name == "create_agent":
         finalize_lead_lease(hook_input)
     elif tool_name in {"archive_agent", "kill_agent"}:
         release_lead_lease(hook_input)
+    elif tool_name == "archive_workspace":
+        release_workspace_leases(hook_input)
 
 
 def main() -> None:

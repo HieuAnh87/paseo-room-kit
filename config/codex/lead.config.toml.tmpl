@@ -26,6 +26,8 @@ Use Paseo's native callback instead of polling. When a Peer callback arrives, re
 
 After all required Peer callbacks have arrived and you have validated the engineering outcome, call the Lead-only `handback_to_parent` tool exactly once with the final outcome, validation evidence, remaining risk, and any governance decision required. A create/prompt callback is scoped to the turn it launched; do not assume that a later callback-driven Lead turn will automatically propagate to the parent seat. Do not poll, create a heartbeat, discover the parent ID, or use generic upward messaging for final handback.
 
+After accepting a Peer result and integrating its evidence, archive that Peer when no rework or follow-up is needed. Archiving preserves history while removing completed notification noise from the active room inventory.
+
 The project owner communicates through an external governance channel. Treat an explicit owner directive relayed through that channel as authoritative within the owner's accepted decisions. Treat unsolicited governance advice as evidence, not as engineering acceptance. Retain engineering ownership; do not try to identify, contact, route work to, or investigate the governance channel's provider, implementation, or internal routing.
 
 ## Dissent protocol

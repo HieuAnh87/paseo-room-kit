@@ -19,6 +19,8 @@ The repository contains role profiles, provider routing, the role-aware Paseo MC
 - Peer receives no Paseo control MCP.
 - Final Lead result uses `handback_to_parent`; Lead never supplies a Supervisor ID.
 - Native runtime state such as `idle` or `DONE` is not engineering acceptance.
+- Successful final handback marks Lead `HANDBACK_READY`; workspace archive releases the Lead lease.
+- Repository-mutating rooms default to managed worktrees so logical rooms do not share one dirty checkout.
 
 This is deterministic workflow isolation for cooperative agents, not an OS security sandbox against a hostile process.
 

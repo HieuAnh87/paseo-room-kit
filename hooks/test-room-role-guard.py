@@ -227,6 +227,106 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(lease["state"], "active")
         self.assertEqual(lease["lead_agent_id"], "lead-new")
 
+    def test_supervisor_cannot_archive_own_workspace(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__archive_workspace",
+                {"workspaceId": "workspace-control"},
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_lead_cannot_archive_workspace(self) -> None:
+        result = self.run_guard(
+            "lead",
+            self.pre(
+                "mcp__paseo__archive_workspace",
+                {"workspaceId": "workspace-project"},
+            ),
+            self.lead_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_post_archive_workspace_releases_and_reconciles_leases(self) -> None:
+        self.write_agent(
+            {
+                "id": "lead-archived",
+                "workspaceId": "workspace-old",
+                "archivedAt": "2026-08-09T00:00:00Z",
+                "labels": {"role": "lead"},
+            }
+        )
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                        },
+                        "workspace-old": {
+                            "state": "active",
+                            "workspace_id": "workspace-old",
+                            "lead_agent_id": "lead-archived",
+                        },
+                    },
+                }
+            )
+        )
+        result = self.run_guard(
+            "supervisor",
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__paseo__archive_workspace",
+                "tool_input": {"workspaceId": "workspace-project"},
+                "tool_use_id": "tool-archive",
+                "tool_response": {"structuredContent": {"workspaceId": "workspace-project"}},
+            },
+            self.supervisor_id,
+        )
+        self.assertIsNone(result)
+        leases = json.loads(self.leases.read_text())["leases"]
+        self.assertEqual(leases["workspace-project"]["state"], "released")
+        self.assertEqual(leases["workspace-project"]["release_reason"], "workspace_archived")
+        self.assertEqual(leases["workspace-old"]["state"], "released")
+        self.assertEqual(
+            leases["workspace-old"]["release_reason"],
+            "archived_agent_reconciled",
+        )
+
+    def test_failed_archive_workspace_does_not_release_lease(self) -> None:
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                        }
+                    },
+                }
+            )
+        )
+        self.run_guard(
+            "supervisor",
+            {
+                "hook_event_name": "PostToolUse",
+                "tool_name": "mcp__paseo__archive_workspace",
+                "tool_input": {"workspaceId": "workspace-project"},
+                "tool_use_id": "tool-archive",
+                "tool_response": {"error": {"code": -32603, "message": "failed"}},
+            },
+            self.supervisor_id,
+        )
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-project"]
+        self.assertEqual(lease["state"], "active")
+
     def test_lead_can_update_only_owned_peer(self) -> None:
         self.write_agent(
             {

@@ -24,6 +24,7 @@ case "$mode" in
 esac
 
 python3 "${repo_root}/tests/test_portability.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_proxy_handback.py" || failures=$((failures + 1))
 python3 -m py_compile \
   "${repo_root}/hooks/room-role-guard.py" \
   "${repo_root}/hooks/test-room-role-guard.py" \

@@ -21,6 +21,10 @@ Supervisor creates a Lead with:
 - `route=planning`
 - `task_state=LEASED`
 
+After a successful final handback, the proxy changes the Lead to:
+
+- `task_state=HANDBACK_READY`
+
 Lead creates a Peer with:
 
 - `role=peer`
@@ -41,6 +45,7 @@ none → pending → active → released
 - The Supervisor proxy reserves `pending` before it forwards `create_agent` to Paseo.
 - The proxy activates the lease with the returned Lead agent ID.
 - Archiving or killing that Lead releases the lease.
+- Archiving the workspace releases its pending or active Lead lease and reconciles any lease whose Lead was already archived.
 - A pending reservation expires after five minutes if creation never completes.
 - A new Lead is denied while an unarchived `role=lead` agent or live lease exists for the workspace.
 - Replacement order is checkpoint → handoff → archive old Lead → verify lease released → create new Lead → reconcile.
@@ -85,6 +90,8 @@ The final report includes:
 - remaining risk or uncertainty;
 - any decision that crosses into Human authority.
 
+Successful delivery changes the Lead label from `LEASED` to `HANDBACK_READY` and rejects duplicate final handback attempts. Human acceptance remains a Human decision; after acceptance or explicit abandonment, Supervisor archives the workspace, which releases the lease while preserving history and local directories.
+
 This explicit handback is event-driven. It does not use polling, schedules, or heartbeats.
 
 ## Routing
@@ -97,3 +104,7 @@ Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 - Room launchers shadow the direct Paseo CLI; internal orchestration must use the role-aware MCP proxy.
 
 The MCP proxy is the deterministic operational boundary. Codex hooks remain defense in depth only because app-server tool paths may bypass lifecycle hooks. None of these mechanisms is a hostile-process security sandbox; Human/top-level daemon administration remains outside the room-agent authority chain.
+
+## Workspace isolation
+
+Use a Paseo-managed worktree for engineering objectives that may mutate a repository, especially when more than one room can touch the same project concurrently. Use local isolation only for explicitly read-only work or work that the Human has chosen to serialize. Logical workspace separation does not isolate a shared local checkout.

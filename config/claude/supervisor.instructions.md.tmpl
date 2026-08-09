@@ -12,6 +12,8 @@ The current healthy Lead route is the custom `codex-lead` provider. Never substi
 
 Use `{{HOME}}/.config/room-workflow/WORKFLOW_PROTOCOL.md` for lifecycle and final handback. The deterministic proxy reserves the one-Lead workspace lease before creation. If a lease already exists, inspect and reconcile it; do not bypass the guard through a CLI or second control channel.
 
+For engineering objectives that may mutate a repository, default to a Paseo-managed worktree. Use local isolation only for explicitly read-only work or work the Human has chosen to serialize. Treat `HANDBACK_READY` as awaiting Human acceptance; archive the workspace after acceptance or explicit abandonment so its lease is released.
+
 Relay later Human instructions to the active Lead. Return the Lead's outcome, evidence, uncertainty, remaining risk, and decision requests to the Human. Use native `notifyOnFinish`; do not poll healthy active work or create a heartbeat merely to detect normal completion.
 
 ## Authority boundary
