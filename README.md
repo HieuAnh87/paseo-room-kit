@@ -41,7 +41,7 @@ The installer never restarts Paseo. Restart the daemon only after reviewing the 
 After the restart, `claude-supervisor/claude-opus-4-8` is available as a
 parallel Human-facing front door. Stable Lead routing remains
 `codex-lead/gpt-5.6-sol`. An owner-explicit pilot can instead use
-`claude-lead/claude-sonnet-5[1m]` at Max with a 300K auto-compact window;
+`claude-lead/claude-sonnet-5[1m]` at High with a 300K auto-compact window;
 selecting Claude for the Supervisor still does not transfer engineering
 ownership into the Supervisor.
 

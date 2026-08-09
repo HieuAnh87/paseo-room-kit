@@ -154,7 +154,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["route"], "planning")
         self.assertEqual(updated["labels"]["lead_profile"], "pilot")
         self.assertEqual(updated["settings"]["modeId"], "bypassPermissions")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "high")
         lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
         self.assertEqual(lease["provider"], "claude-lead/claude-sonnet-5[1m]")
 
@@ -480,7 +480,7 @@ const r=await tools.mcp__paseo__create_agent({
   provider:"claude-lead/claude-sonnet-5[1m]",
   notifyOnFinish:true,
   labels:{role:"lead",route:"planning",lead_profile:"pilot",task_state:"LEASED"},
-  settings:{modeId:"bypassPermissions",thinkingOptionId:"max"},
+  settings:{modeId:"bypassPermissions",thinkingOptionId:"high"},
   initialPrompt:`Own the objective.`
 });text(r)
 """

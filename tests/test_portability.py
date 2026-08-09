@@ -81,6 +81,10 @@ class PortabilityTest(unittest.TestCase):
             claude_lead["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
             "300000",
         )
+        self.assertEqual(
+            claude_lead["models"][0]["thinkingOptions"][0]["id"],
+            "high",
+        )
         self.assertIn("Agent", claude_lead["disallowedTools"])
 
         for role in ("supervisor", "lead", "peer"):

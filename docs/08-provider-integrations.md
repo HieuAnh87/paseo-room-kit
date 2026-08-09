@@ -31,7 +31,7 @@ claude-supervisor
 
 claude-lead
   → ~/.local/bin/claude-room lead
-  → Claude Sonnet 5 1M · Max
+  → Claude Sonnet 5 1M · High
   → 300K auto-compact window + Lead instructions/settings/Paseo MCP
 ```
 

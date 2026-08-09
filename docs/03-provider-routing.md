@@ -7,7 +7,7 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 | Category | Provider/model | Thinking | Dùng cho |
 |---|---|---|---|
 | `planning` | `codex-lead/gpt-5.6-sol` | Medium mặc định | Supervisor bootstrap Lead |
-| `planning_pilot` | `claude-lead/claude-sonnet-5[1m]` | Max | chỉ khi Human yêu cầu Sonnet Lead pilot |
+| `planning_pilot` | `claude-lead/claude-sonnet-5[1m]` | High | chỉ khi Human yêu cầu Sonnet Lead pilot |
 | `impl` | `opencode-peer/aibox/deepseek-v4-flash` | Max | implementation bình thường, cơ khí, isolated |
 | `impl_deep` | `codex-peer/gpt-5.6-luna` | Max | implementation khó, cross-cutting, nhiều uncertainty |
 | `search` | `codex-peer/gpt-5.6-luna` | Low | delegated codebase navigation/search |
@@ -40,7 +40,7 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 
 ### `claude-lead`
 
-- Sonnet 5 1M: Max, là model duy nhất của provider pilot.
+- Sonnet 5 1M: High, là model duy nhất của provider pilot.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`: 1M là capacity ceiling, active window được compact sớm.
 - Chỉ được chọn bằng `planning_pilot` sau explicit Human request; stable default vẫn là Sol.
 - Dùng `claude-room lead`, role-aware Paseo MCP và cùng Lead lease/handback contract; Claude native Agent/Task bị deny.

@@ -102,6 +102,6 @@ Thêm Lead-only `handback_to_parent` trong role proxy. Tool:
 
 ## D17 — Sonnet 5 Lead pilot với working context 300K
 
-Giữ `planning` stable ở `codex-lead/gpt-5.6-sol`. Thêm route owner-explicit `planning_pilot` tới `claude-lead/claude-sonnet-5[1m]` Max. Lead pilot dùng cùng lease, authority, Peer routing và final handback contract.
+Giữ `planning` stable ở `codex-lead/gpt-5.6-sol`. Thêm route owner-explicit `planning_pilot` tới `claude-lead/claude-sonnet-5[1m]` High. Lead pilot dùng cùng lease, authority, Peer routing và final handback contract.
 
 Biến thể 1M chỉ là headroom. Claude runtime đặt `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`; Lead phải giữ trạng thái chính xác trong artifact bền vững và không xem compact summary là source of truth. Guard chỉ chấp nhận pilot khi creation có `lead_profile=pilot`; nếu không, stable route vẫn là bắt buộc.

@@ -500,7 +500,7 @@ def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
         return
     if provider.startswith("claude-lead/"):
         settings["modeId"] = "bypassPermissions"
-        settings["thinkingOptionId"] = "max"
+        settings["thinkingOptionId"] = "high"
         return
     deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
 
@@ -513,8 +513,8 @@ def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("claude-lead/"):
         if settings.get("modeId") != "bypassPermissions":
             deny("Claude Lead creation requires settings.modeId: bypassPermissions.")
-        if settings.get("thinkingOptionId") != "max":
-            deny("Claude Lead creation requires thinkingOptionId: max.")
+        if settings.get("thinkingOptionId") != "high":
+            deny("Claude Lead creation requires thinkingOptionId: high.")
         return
     deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
 
