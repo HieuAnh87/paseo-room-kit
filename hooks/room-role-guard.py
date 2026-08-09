@@ -655,6 +655,8 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
     record = find_agent(target)
     if not record:
         deny(f"Room guard could not resolve target agent {target}.")
+    if role == "supervisor" and tool_name == "archive_agent" and record.get("archivedAt"):
+        return
     labels = record.get("labels")
     labels = labels if isinstance(labels, dict) else {}
     expected_role = "lead" if role == "supervisor" else "peer"

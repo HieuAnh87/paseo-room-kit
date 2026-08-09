@@ -363,6 +363,25 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertIsNone(allowed)
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_supervisor_can_rearchive_persisted_archived_agent_for_recovery(self) -> None:
+        self.write_agent(
+            {
+                "id": "legacy-archived",
+                "workspaceId": "workspace-old",
+                "archivedAt": "2026-08-09T00:00:00Z",
+                "labels": {},
+            }
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__archive_agent",
+                {"agentId": "legacy-archived"},
+            ),
+            self.supervisor_id,
+        )
+        self.assertIsNone(result)
+
     def test_peer_cannot_reach_nested_paseo_tool_through_exec(self) -> None:
         result = self.run_guard(
             "peer",
