@@ -83,9 +83,11 @@ for role in supervisor lead peer; do
   install_file "${repo_root}/config/codex/${role}.config.toml.tmpl" \
     "${target_home}/.codex/${role}.config.toml" 644 render
 done
-for asset in instructions.md settings.json mcp.json; do
-  install_file "${repo_root}/config/claude/supervisor.${asset}.tmpl" \
-    "${target_home}/.config/claude-room/supervisor/${asset}" 600 render
+for role in supervisor lead; do
+  for asset in instructions.md settings.json mcp.json; do
+    install_file "${repo_root}/config/claude/${role}.${asset}.tmpl" \
+      "${target_home}/.config/claude-room/${role}/${asset}" 600 render
+  done
 done
 install_file "${repo_root}/config/codex/model-instructions.md" \
   "${target_home}/.codex/model-instructions.md" 644

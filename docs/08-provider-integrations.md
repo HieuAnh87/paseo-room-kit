@@ -28,12 +28,20 @@ claude-supervisor
   → ~/.local/bin/claude-room supervisor
   → Claude Opus 4.8
   → explicit Supervisor instructions/settings/Paseo MCP
+
+claude-lead
+  → ~/.local/bin/claude-room lead
+  → Claude Sonnet 5 1M · Max
+  → 300K auto-compact window + Lead instructions/settings/Paseo MCP
 ```
 
-`claude-supervisor` là Human-facing front door song song, không phải category
-Peer và không thay `planning` preference. Wrapper dùng strict MCP config, chặn
-native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa mọi
-delegation qua Paseo. Lead phía dưới vẫn là `codex-lead/gpt-5.6-sol`.
+`claude-supervisor` là Human-facing front door song song. `claude-lead` là
+engineering-owner pilot riêng và chỉ được route khi Human yêu cầu rõ; stable
+`planning` vẫn là `codex-lead/gpt-5.6-sol`. Wrapper dùng strict MCP config,
+chặn native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
+mọi delegation qua Paseo. Lead pilot dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+chính thức của Claude Code để giới hạn active window ở 300K dù model có ceiling
+1M.
 
 ## Gemini qua `antigravity-acp`
 
@@ -72,6 +80,7 @@ Local installation:
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
 | governance Supervisor thử nghiệm | `claude-supervisor/claude-opus-4-8` |
+| engineering Lead pilot dài hạn | `claude-lead/claude-sonnet-5[1m]` |
 | direct interactive Claude | built-in `claude`, không tự đưa vào Peer route |
 
 ## Auth/config boundary

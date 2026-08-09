@@ -22,6 +22,7 @@ PARENT_LABEL = "paseo.parent-agent-id"
 ROLE_LABEL = "role"
 ROUTE_LABEL = "route"
 TASK_STATE_LABEL = "task_state"
+LEAD_PROFILE_LABEL = "lead_profile"
 PENDING_LEASE_SECONDS = 300
 
 PEER_OUTCOMES = {
@@ -476,6 +477,48 @@ def normalize_labels(tool_input: dict[str, Any]) -> dict[str, str]:
     return dict(labels)
 
 
+def resolve_lead_route(
+    providers: dict[str, str],
+    labels: dict[str, str],
+) -> tuple[str, str]:
+    profile = labels.get(LEAD_PROFILE_LABEL, "stable")
+    provider_key = {
+        "stable": "planning",
+        "pilot": "planning_pilot",
+    }.get(profile)
+    if provider_key is None:
+        deny(f"Unsupported Lead profile {profile!r}.")
+    expected = providers.get(provider_key)
+    if not expected:
+        deny(f"Room guard requires a {provider_key} provider preference.")
+    return profile, expected
+
+
+def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
+    if provider.startswith("codex-lead/"):
+        settings["modeId"] = "full-access"
+        return
+    if provider.startswith("claude-lead/"):
+        settings["modeId"] = "bypassPermissions"
+        settings["thinkingOptionId"] = "max"
+        return
+    deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
+
+
+def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
+    if provider.startswith("codex-lead/"):
+        if settings.get("modeId") != "full-access":
+            deny("Codex Lead creation requires settings.modeId: full-access.")
+        return
+    if provider.startswith("claude-lead/"):
+        if settings.get("modeId") != "bypassPermissions":
+            deny("Claude Lead creation requires settings.modeId: bypassPermissions.")
+        if settings.get("thinkingOptionId") != "max":
+            deny("Claude Lead creation requires thinkingOptionId: max.")
+        return
+    deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
+
+
 def reserve_lead_lease(
     workspace_id: str,
     supervisor_id: str,
@@ -547,9 +590,11 @@ def guard_create_agent(
     settings = dict(settings)
 
     if role == "supervisor":
-        expected = providers["planning"]
+        profile, expected = resolve_lead_route(providers, labels)
         if provider != expected:
-            deny(f"Supervisor may create only the planning Lead route ({expected}), not {provider}.")
+            deny(
+                f"Supervisor Lead profile {profile} requires {expected}, not {provider}."
+            )
         workspace_id = current_workspace_id(tool_input)
         tool_use_id = hook_input.get("tool_use_id")
         if not isinstance(tool_use_id, str) or not tool_use_id:
@@ -558,7 +603,8 @@ def guard_create_agent(
         labels[ROLE_LABEL] = "lead"
         labels[ROUTE_LABEL] = "planning"
         labels[TASK_STATE_LABEL] = "LEASED"
-        settings["modeId"] = "full-access"
+        labels[LEAD_PROFILE_LABEL] = profile
+        normalize_lead_settings(provider, settings)
     else:
         route = labels.get(ROUTE_LABEL)
         if not route:
@@ -603,9 +649,11 @@ def guard_nested_create_agent(
         deny("Nested create_agent requires notifyOnFinish: true.")
 
     if role == "supervisor":
-        expected = providers["planning"]
+        profile, expected = resolve_lead_route(providers, labels)
         if provider != expected:
-            deny(f"Supervisor may create only the planning Lead route ({expected}), not {provider}.")
+            deny(
+                f"Supervisor Lead profile {profile} requires {expected}, not {provider}."
+            )
         required_labels = {
             ROLE_LABEL: "lead",
             ROUTE_LABEL: "planning",
@@ -614,8 +662,9 @@ def guard_nested_create_agent(
         for key, expected_value in required_labels.items():
             if labels.get(key) != expected_value:
                 deny(f"Supervisor create_agent requires {key}: {expected_value}.")
-        if settings.get("modeId") != "full-access":
-            deny("Supervisor create_agent requires settings.modeId: full-access.")
+        if LEAD_PROFILE_LABEL in labels and labels[LEAD_PROFILE_LABEL] != profile:
+            deny(f"Supervisor create_agent requires {LEAD_PROFILE_LABEL}: {profile}.")
+        validate_lead_settings(provider, settings)
         workspace_id = current_workspace_id(tool_input)
         tool_use_id = hook_input.get("tool_use_id")
         if not isinstance(tool_use_id, str) or not tool_use_id:

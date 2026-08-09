@@ -59,10 +59,11 @@ Supervisor <redacted-agent>
 | `claude-supervisor` | custom Human-facing Supervisor thử nghiệm, dùng Opus 4.8 Medium/High/Max |
 | `codex-supervisor` | custom Supervisor, dùng Sol/Luna |
 | `codex-lead` | custom Lead, dùng Sol/Luna |
+| `claude-lead` | custom Lead pilot, dùng Sonnet 5 1M Max với auto-compact window 300K |
 | `codex-peer` | custom bounded Codex Peer, dùng Sol/Luna |
 | `opencode-peer` | custom OpenCode ACP Peer, AI Box DeepSeek/GLM |
 | `gemini-ui` | custom ACP provider qua antigravity-acp, model catalog giới hạn về Gemini |
-| `claude` | built-in Claude đang enabled cho direct/manual use; không phải Peer route mặc định |
+| `claude` | built-in Claude đang enabled cho direct/manual use; không phải internal role route |
 | stock `codex`/`opencode` | vẫn có thể xuất hiện trong daemon nhưng không được profile cho phép dùng để tạo Lead/Peer mới trong chain custom |
 | `omp`, `pi`, `copilot` | disabled trong config |
 

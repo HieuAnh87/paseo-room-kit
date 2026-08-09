@@ -5,7 +5,7 @@ role="${1:?room role is required}"
 shift
 
 case "$role" in
-  supervisor) ;;
+  supervisor|lead) ;;
   *)
     printf 'unsupported Claude room role: %s\n' "$role" >&2
     exit 2

@@ -25,6 +25,7 @@ class RoomRoleGuardTest(unittest.TestCase):
                 {
                     "providers": {
                         "planning": "codex-lead/gpt-5.6-sol",
+                        "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
                         "impl": "opencode-peer/aibox/deepseek-v4-flash",
                         "impl_deep": "codex-peer/gpt-5.6-luna",
                         "search": "codex-peer/gpt-5.6-luna",
@@ -128,9 +129,50 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(output["permissionDecision"], "allow")
         self.assertEqual(output["updatedInput"]["labels"]["role"], "lead")
         self.assertEqual(output["updatedInput"]["labels"]["route"], "planning")
+        self.assertEqual(output["updatedInput"]["labels"]["lead_profile"], "stable")
         self.assertTrue(output["updatedInput"]["notifyOnFinish"])
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["state"], "pending")
+
+    def test_supervisor_rewrites_claude_pilot_lead(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "claude-lead/claude-sonnet-5[1m]",
+                    "workspaceId": "workspace-pilot",
+                    "title": "Pilot Lead",
+                    "initialPrompt": "Own the objective.",
+                    "labels": {"lead_profile": "pilot"},
+                },
+            ),
+            self.supervisor_id,
+        )
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["labels"]["role"], "lead")
+        self.assertEqual(updated["labels"]["route"], "planning")
+        self.assertEqual(updated["labels"]["lead_profile"], "pilot")
+        self.assertEqual(updated["settings"]["modeId"], "bypassPermissions")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
+        self.assertEqual(lease["provider"], "claude-lead/claude-sonnet-5[1m]")
+
+    def test_supervisor_rejects_pilot_provider_without_pilot_label(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "claude-lead/claude-sonnet-5[1m]",
+                    "workspaceId": "workspace-pilot",
+                    "title": "Pilot Lead",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_lead_rewrites_search_thinking(self) -> None:
         result = self.run_guard(
@@ -430,6 +472,26 @@ const r=await tools.mcp__paseo__create_agent({
         self.assertIsNone(result)
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["state"], "pending")
+
+    def test_supervisor_nested_exec_accepts_claude_pilot_contract(self) -> None:
+        source = """
+const r=await tools.mcp__paseo__create_agent({
+  workspaceId:"workspace-pilot",
+  provider:"claude-lead/claude-sonnet-5[1m]",
+  notifyOnFinish:true,
+  labels:{role:"lead",route:"planning",lead_profile:"pilot",task_state:"LEASED"},
+  settings:{modeId:"bypassPermissions",thinkingOptionId:"max"},
+  initialPrompt:`Own the objective.`
+});text(r)
+"""
+        result = self.run_guard(
+            "supervisor",
+            self.pre("exec", {"input": source}),
+            self.supervisor_id,
+        )
+        self.assertIsNone(result)
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
+        self.assertEqual(lease["provider"], "claude-lead/claude-sonnet-5[1m]")
 
     def test_lead_nested_exec_requires_full_static_route_contract(self) -> None:
         missing_mode = """

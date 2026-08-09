@@ -184,6 +184,38 @@
           }
         ]
       },
+      "claude-lead": {
+        "extends": "claude",
+        "label": "Claude Sonnet Lead · Pilot",
+        "description": "Pilot engineering Lead using Sonnet 5 with bounded active context",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "lead"
+        ],
+        "env": {
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task"
+        ],
+        "models": [
+          {
+            "id": "claude-sonnet-5[1m]",
+            "label": "Sonnet 5 1M · Pilot",
+            "isDefault": true,
+            "contextWindowMaxTokens": 1000000,
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
       "codex-peer": {
         "extends": "codex",
         "label": "Codex Peer",

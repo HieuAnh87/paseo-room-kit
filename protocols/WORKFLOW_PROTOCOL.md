@@ -19,6 +19,7 @@ Supervisor creates a Lead with:
 
 - `role=lead`
 - `route=planning`
+- `lead_profile=stable|pilot`
 - `task_state=LEASED`
 
 After a successful final handback, the proxy changes the Lead to:
@@ -98,9 +99,9 @@ This explicit handback is event-driven. It does not use polling, schedules, or h
 
 Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 
-- Supervisor may create only the `planning` route.
+- Supervisor uses `planning` and `lead_profile=stable` by default. It may use `planning_pilot` and `lead_profile=pilot` only after an explicit Human request; the canonical Lead route label remains `planning`.
 - Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model and normalizes required thinking.
-- Stock `codex/...` is invalid for internal Lead or Peer seats.
+- Stock providers are invalid for internal Lead or Peer seats.
 - Room launchers shadow the direct Paseo CLI; internal orchestration must use the role-aware MCP proxy.
 
 The MCP proxy is the deterministic operational boundary. Codex hooks remain defense in depth only because app-server tool paths may bypass lifecycle hooks. None of these mechanisms is a hostile-process security sandbox; Human/top-level daemon administration remains outside the room-agent authority chain.

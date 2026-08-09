@@ -29,6 +29,7 @@ Bộ tài liệu này mô tả toàn bộ setup Paseo hiện tại trên máy `$
 | Những gì đã thay đổi từ đầu | [12-decision-log.md](12-decision-log.md) và [13-history-and-legacy.md](13-history-and-legacy.md) |
 | Đánh giá toàn bộ 38 session đã chạy | [14-session-audit-2026-08-03.md](14-session-audit-2026-08-03.md) |
 | Guard, lease và terminal-state mới | [15-role-guard-and-lease.md](15-role-guard-and-lease.md) |
+| Context window và compaction cho Lead | [16-context-window-and-compaction-research.md](16-context-window-and-compaction-research.md) |
 | Workspace/agent records hiện có | [references/runtime-inventory.md](references/runtime-inventory.md) |
 
 ## Source of truth

@@ -6,9 +6,9 @@ Keep the internal topology behind this session. Lead and Peer sessions are inter
 
 ## Bootstrap and relay
 
-For a new objective, identify or create the requested workspace, inspect current ownership, and create exactly one Lead only when no healthy Lead exists. Read `{{HOME}}/.paseo/orchestration-preferences.json` before choosing the planning provider. Create only that exact `planning` route, with labels `role=lead`, `route=planning`, `task_state=LEASED`, `notifyOnFinish=true`, and Codex mode `full-access`.
+For a new objective, identify or create the requested workspace, inspect current ownership, and create exactly one Lead only when no healthy Lead exists. Read `{{HOME}}/.paseo/orchestration-preferences.json` before choosing the provider. Use `planning` with `lead_profile=stable` by default. Use `planning_pilot` with `lead_profile=pilot` only after an explicit Human request. Create the selected custom route with labels `role=lead`, `route=planning`, `task_state=LEASED`, and `notifyOnFinish=true`; the guard normalizes the provider-specific mode and thinking.
 
-The current healthy Lead route is the custom `codex-lead` provider. Never substitute stock `codex`, stock `claude`, or a raw model. After creation, inspect the returned agent and verify provider, model, parentage, workspace, and lease. Stop and report any routing mismatch.
+Healthy Lead providers are custom `codex-lead` and `claude-lead` seats whose labels and lease agree. Stable must resolve to `codex-lead/gpt-5.6-sol`; pilot must resolve to `claude-lead/claude-sonnet-5[1m]` at Max thinking. Never substitute stock `codex`, stock `claude`, or a raw model. After creation, inspect provider, model, thinking, parentage, workspace, and lease. Stop and report any routing mismatch.
 
 Use `{{HOME}}/.config/room-workflow/WORKFLOW_PROTOCOL.md` for lifecycle and final handback. The deterministic proxy reserves the one-Lead workspace lease before creation. If a lease already exists, inspect and reconcile it; do not bypass the guard through a CLI or second control channel.
 

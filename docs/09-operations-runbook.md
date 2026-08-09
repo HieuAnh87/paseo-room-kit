@@ -7,8 +7,8 @@ Human không cần biết Lead ID. Luồng vận hành:
 1. Mở hoặc tạo workspace ở project root.
 2. Nói objective/constraint/accepted decision với Supervisor.
 3. Supervisor kiểm tra workspace ownership.
-4. Nếu chưa có Lead khỏe, Supervisor tạo `codex-lead/gpt-5.6-sol` theo `planning` preference.
-5. Creation có labels `role=lead`, `route=planning`, `task_state=LEASED`; MCP proxy reserve lease trước khi forward.
+4. Nếu chưa có Lead khỏe, Supervisor tạo stable `codex-lead/gpt-5.6-sol` theo `planning`; chỉ dùng `claude-lead/claude-sonnet-5[1m]` theo `planning_pilot` khi Human yêu cầu rõ.
+5. Creation có labels `role=lead`, `route=planning`, `lead_profile=stable|pilot`, `task_state=LEASED`; MCP proxy reserve lease trước khi forward.
 6. Supervisor inspect provider/model và active lease ngay sau creation.
 7. Lead nhận brief và tự quyết định có cần Peer hay không.
 8. Sau callback/validation, Lead gọi `handback_to_parent` đúng một lần.
@@ -24,6 +24,7 @@ paseo provider ls
 paseo provider models codex-supervisor
 paseo provider models claude-supervisor
 paseo provider models codex-lead
+paseo provider models claude-lead
 paseo provider models codex-peer
 paseo provider models opencode-peer
 paseo provider models gemini-ui
@@ -47,7 +48,7 @@ Kiểm tra tối thiểu:
 
 ```text
 Supervisor: provider starts codex-supervisor/ hoặc claude-supervisor/
-Lead: provider starts codex-lead/
+Lead: provider starts codex-lead/ hoặc claude-lead/, khớp lead_profile và lease
 Peer: provider starts codex-peer/, opencode-peer/ hoặc gemini-ui/
 ParentAgentId: đúng owner
 Cwd/workspace: đúng project

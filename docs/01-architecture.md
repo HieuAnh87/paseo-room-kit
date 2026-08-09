@@ -24,6 +24,7 @@ Paseo daemon
   ├── claude-supervisor → claude-room supervisor → Claude Opus runtime
   ├── codex-supervisor → codex-room supervisor → Codex runtime
   ├── codex-lead       → codex-room lead       → Codex runtime
+  ├── claude-lead      → claude-room lead      → Claude Sonnet runtime
   ├── codex-peer       → codex-room peer       → Codex runtime
   ├── opencode-peer    → opencode-paseo-peer   → OpenCode ACP
   └── gemini-ui        → antigravity-acp       → agy/Antigravity CLI
@@ -71,6 +72,9 @@ Một agent có thể được đặt trong workspace khác nhưng vẫn là chi
 
 ~/.codex/{supervisor,lead,peer}.config.toml
   └── role overlay: model, permissions, developer instructions
+
+~/.config/claude-room/{supervisor,lead}/
+  └── isolated Claude instructions, settings and role-aware Paseo MCP
 
 ~/.local/bin/codex-room*
   └── materialize role runtime and exec external Codex

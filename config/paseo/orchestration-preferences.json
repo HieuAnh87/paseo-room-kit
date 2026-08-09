@@ -6,10 +6,13 @@
     "ui": "gemini-ui/gemini-3.6-flash-medium",
     "research": "opencode-peer/aibox/deepseek-v4-flash",
     "planning": "codex-lead/gpt-5.6-sol",
+    "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
     "audit": "codex-peer/gpt-5.6-luna"
   },
   "preferences": [
-    "The human-facing Supervisor must use the planning provider preference when bootstrapping the internal Lead seat; never create that Lead with the stock codex provider.",
+    "The human-facing Supervisor must use the planning provider preference by default when bootstrapping the internal Lead seat; never create that Lead with a stock provider.",
+    "Use planning_pilot only when the Human explicitly requests the Sonnet Lead pilot. Mark that Lead with lead_profile=pilot; otherwise use planning and lead_profile=stable.",
+    "The Claude Lead pilot uses Sonnet 5 1M at Max thinking with a 300000-token auto-compact window. Treat 1M as headroom, not a target working set.",
     "The Lead must use the impl, impl_deep, search, research, or ui provider preference when creating a bounded Peer; never create an internal Peer with the stock codex provider.",
     "Use impl (DeepSeek V4 Flash) for normal, mechanical, isolated implementation. Use impl_deep (Codex Peer Luna) for difficult, cross-cutting, or uncertainty-heavy implementation; use audit (Codex Peer Luna) for review. For codex-peer impl_deep or audit work, request Max thinking.",
     "Use search (Codex Peer Luna) for delegated codebase navigation/search and request Low thinking. Direct rg/GitNexus calls stay inside the current agent and do not spawn another model.",

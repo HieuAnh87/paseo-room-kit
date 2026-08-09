@@ -9,7 +9,7 @@ Ngoài ra, Paseo `0.2.5` không implement `injectIntoProviders`. Global `injectI
 ## Enforcement path
 
 ```text
-Codex Supervisor/Lead
+Codex or Claude Supervisor/Lead
   → stdio MCP: paseo-room-mcp <role>
   → room-role-guard.py PreToolUse
   → Paseo HTTP MCP /mcp/agents?callerAgentId=...
@@ -22,9 +22,9 @@ Codex lọc `PASEO_AGENT_ID` khi launch stdio MCP subprocess. Proxy ưu tiên en
 
 Guard trước upstream:
 
-- Supervisor `create_agent` chỉ chấp nhận exact `planning` provider;
+- Supervisor `create_agent` mặc định chỉ chấp nhận exact `planning`; `planning_pilot` cần explicit `lead_profile=pilot`;
 - Lead phải khai báo `route` và dùng exact provider/model từ orchestration preferences;
-- canonicalize role, route, task state, thinking, full-access Codex mode và `notifyOnFinish`;
+- canonicalize role, route, Lead profile, task state, thinking, provider-specific unattended mode và `notifyOnFinish`;
 - Peer deny toàn bộ Paseo tools;
 - mutation vào agent khác phải đúng parent→child và expected role.
 
@@ -35,7 +35,7 @@ Guard sau upstream:
 
 Proxy còn cung cấp synthetic `handback_to_parent` riêng cho Lead. Nó không nhận target ID từ model, chỉ resolve active parent governance seat từ Paseo-owned parent metadata rồi forward final report. Supervisor và Peer không thấy tool này.
 
-`codex-room-sync` cấp proxy MCP cho Supervisor/Lead và không cấp cho Peer. Nó cũng ép `mcp__paseo` đi direct-only trong Codex code mode.
+`codex-room-sync` cấp proxy MCP cho Codex Supervisor/Lead và không cấp cho Peer. `claude-room` cấp cùng proxy bằng strict role MCP config cho Claude Supervisor/Lead. Codex còn ép `mcp__paseo` đi direct-only trong code mode.
 
 ## Vì sao không chỉ dùng Codex hooks?
 

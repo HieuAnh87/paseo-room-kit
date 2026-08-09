@@ -5,7 +5,7 @@
 ```text
 1. Human gửi objective cho Supervisor
 2. Supervisor xác định workspace và ownership hiện tại
-3. Nếu chưa có Lead khỏe, Supervisor bootstrap đúng một codex-lead
+3. Nếu chưa có Lead khỏe, Supervisor bootstrap đúng một Lead: stable Sol mặc định hoặc Sonnet pilot khi Human yêu cầu
 4. Supervisor relay objective + accepted decisions + constraints + reporting contract
 5. Lead phân rã engineering và quyết định có cần Peer hay không
 6. Lead tạo bounded Peer theo category/model phù hợp

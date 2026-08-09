@@ -71,6 +71,17 @@ class PortabilityTest(unittest.TestCase):
             "claude-opus-4-8",
         )
         self.assertIn("Agent", claude_supervisor["disallowedTools"])
+        claude_lead = value["agents"]["providers"]["claude-lead"]
+        self.assertEqual(claude_lead["extends"], "claude")
+        self.assertEqual(
+            claude_lead["models"][0]["id"],
+            "claude-sonnet-5[1m]",
+        )
+        self.assertEqual(
+            claude_lead["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
+            "300000",
+        )
+        self.assertIn("Agent", claude_lead["disallowedTools"])
 
         for role in ("supervisor", "lead", "peer"):
             text = (
@@ -79,13 +90,14 @@ class PortabilityTest(unittest.TestCase):
             self.assertNotIn("{{", text)
             tomllib.loads(text)
 
-        for name in ("instructions.md", "settings.json", "mcp.json"):
-            text = (
-                ROOT / f"config/claude/supervisor.{name}.tmpl"
-            ).read_text().replace("{{HOME}}", str(home))
-            self.assertNotIn("{{", text)
-            if name.endswith(".json"):
-                json.loads(text)
+        for role in ("supervisor", "lead"):
+            for name in ("instructions.md", "settings.json", "mcp.json"):
+                text = (
+                    ROOT / f"config/claude/{role}.{name}.tmpl"
+                ).read_text().replace("{{HOME}}", str(home))
+                self.assertNotIn("{{", text)
+                if name.endswith(".json"):
+                    json.loads(text)
 
     def test_runtime_state_templates_are_empty(self) -> None:
         leases = json.loads((ROOT / "templates/lead-leases.empty.json").read_text())
