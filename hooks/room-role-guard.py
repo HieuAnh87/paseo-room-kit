@@ -23,6 +23,7 @@ ROLE_LABEL = "role"
 ROUTE_LABEL = "route"
 TASK_STATE_LABEL = "task_state"
 LEAD_PROFILE_LABEL = "lead_profile"
+STACK_PROFILE_LABEL = "stack_profile"
 PENDING_LEASE_SECONDS = 300
 
 PEER_OUTCOMES = {
@@ -480,18 +481,31 @@ def normalize_labels(tool_input: dict[str, Any]) -> dict[str, str]:
 def resolve_lead_route(
     providers: dict[str, str],
     labels: dict[str, str],
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     profile = labels.get(LEAD_PROFILE_LABEL, "stable")
     provider_key = {
         "stable": "planning",
         "pilot": "planning_pilot",
+        "budget": "planning_budget",
     }.get(profile)
     if provider_key is None:
         deny(f"Unsupported Lead profile {profile!r}.")
     expected = providers.get(provider_key)
     if not expected:
         deny(f"Room guard requires a {provider_key} provider preference.")
-    return profile, expected
+    stack_profile = "budget" if profile == "budget" else "standard"
+    requested_stack = labels.get(STACK_PROFILE_LABEL, stack_profile)
+    if requested_stack != stack_profile:
+        deny(
+            f"Lead profile {profile} requires {STACK_PROFILE_LABEL}: {stack_profile}."
+        )
+    caller = find_agent(current_agent_id())
+    caller_provider = caller.get("provider") if isinstance(caller, dict) else None
+    if profile == "budget" and caller_provider != "opencode-supervisor":
+        deny("Only the OpenCode budget Supervisor may create the budget Lead.")
+    if caller_provider == "opencode-supervisor" and profile != "budget":
+        deny("The OpenCode budget Supervisor may create only the budget Lead.")
+    return profile, stack_profile, expected
 
 
 def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
@@ -501,6 +515,10 @@ def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("claude-lead/"):
         settings["modeId"] = "bypassPermissions"
         settings["thinkingOptionId"] = "high"
+        return
+    if provider.startswith("opencode-lead/"):
+        settings["modeId"] = "build"
+        settings["thinkingOptionId"] = "max"
         return
     deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
 
@@ -516,7 +534,34 @@ def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
         if settings.get("thinkingOptionId") != "high":
             deny("Claude Lead creation requires thinkingOptionId: high.")
         return
+    if provider.startswith("opencode-lead/"):
+        if settings.get("modeId") != "build":
+            deny("OpenCode Lead creation requires settings.modeId: build.")
+        if settings.get("thinkingOptionId") != "max":
+            deny("OpenCode Lead creation requires thinkingOptionId: max.")
+        return
     deny(f"Lead route must use an approved custom Lead provider, not {provider}.")
+
+
+def current_lead_stack_profile() -> str:
+    record = find_agent(current_agent_id())
+    labels = record.get("labels") if isinstance(record, dict) else None
+    if not isinstance(labels, dict):
+        return "standard"
+    stack_profile = labels.get(STACK_PROFILE_LABEL, "standard")
+    if stack_profile not in {"standard", "budget"}:
+        deny(f"Unsupported Lead stack profile {stack_profile!r}.")
+    return stack_profile
+
+
+def peer_route_provider_key(route: str, stack_profile: str) -> str:
+    return f"{route}_budget" if stack_profile == "budget" else route
+
+
+def peer_route_thinking(route: str, stack_profile: str) -> str | None:
+    if stack_profile == "budget" and route != "ui":
+        return "max"
+    return ROUTE_THINKING.get(route)
 
 
 def reserve_lead_lease(
@@ -590,7 +635,7 @@ def guard_create_agent(
     settings = dict(settings)
 
     if role == "supervisor":
-        profile, expected = resolve_lead_route(providers, labels)
+        profile, stack_profile, expected = resolve_lead_route(providers, labels)
         if provider != expected:
             deny(
                 f"Supervisor Lead profile {profile} requires {expected}, not {provider}."
@@ -604,6 +649,7 @@ def guard_create_agent(
         labels[ROUTE_LABEL] = "planning"
         labels[TASK_STATE_LABEL] = "LEASED"
         labels[LEAD_PROFILE_LABEL] = profile
+        labels[STACK_PROFILE_LABEL] = stack_profile
         normalize_lead_settings(provider, settings)
     else:
         route = labels.get(ROUTE_LABEL)
@@ -612,18 +658,23 @@ def guard_create_agent(
         allowed_routes = {"impl", "impl_deep", "search", "ui", "research", "audit"}
         if route not in allowed_routes:
             deny(f"Lead cannot create route {route!r}.")
-        expected = providers.get(route)
+        stack_profile = current_lead_stack_profile()
+        provider_key = peer_route_provider_key(route, stack_profile)
+        expected = providers.get(provider_key)
         if not expected:
-            deny(f"No provider preference is configured for Peer route {route}.")
+            deny(f"No provider preference is configured for Peer route {provider_key}.")
         if provider != expected:
-            deny(f"Route {route} requires {expected}, not {provider}.")
+            deny(f"Route {provider_key} requires {expected}, not {provider}.")
         labels[ROLE_LABEL] = "peer"
         labels[TASK_STATE_LABEL] = "ASSIGNED"
-        required_thinking = ROUTE_THINKING.get(route)
+        labels[STACK_PROFILE_LABEL] = stack_profile
+        required_thinking = peer_route_thinking(route, stack_profile)
         if required_thinking:
             settings["thinkingOptionId"] = required_thinking
         if provider.startswith("codex-peer/"):
             settings["modeId"] = "full-access"
+        if provider.startswith("opencode-peer/"):
+            settings["modeId"] = "build"
 
     updated["labels"] = labels
     updated["settings"] = settings
@@ -649,7 +700,7 @@ def guard_nested_create_agent(
         deny("Nested create_agent requires notifyOnFinish: true.")
 
     if role == "supervisor":
-        profile, expected = resolve_lead_route(providers, labels)
+        profile, stack_profile, expected = resolve_lead_route(providers, labels)
         if provider != expected:
             deny(
                 f"Supervisor Lead profile {profile} requires {expected}, not {provider}."
@@ -664,6 +715,8 @@ def guard_nested_create_agent(
                 deny(f"Supervisor create_agent requires {key}: {expected_value}.")
         if LEAD_PROFILE_LABEL in labels and labels[LEAD_PROFILE_LABEL] != profile:
             deny(f"Supervisor create_agent requires {LEAD_PROFILE_LABEL}: {profile}.")
+        if STACK_PROFILE_LABEL in labels and labels[STACK_PROFILE_LABEL] != stack_profile:
+            deny(f"Supervisor create_agent requires {STACK_PROFILE_LABEL}: {stack_profile}.")
         validate_lead_settings(provider, settings)
         workspace_id = current_workspace_id(tool_input)
         tool_use_id = hook_input.get("tool_use_id")
@@ -676,20 +729,26 @@ def guard_nested_create_agent(
     allowed_routes = {"impl", "impl_deep", "search", "ui", "research", "audit"}
     if route not in allowed_routes:
         deny(f"Lead must use an allowed static Peer route, not {route!r}.")
-    expected = providers.get(route)
+    stack_profile = current_lead_stack_profile()
+    provider_key = peer_route_provider_key(route, stack_profile)
+    expected = providers.get(provider_key)
     if not expected:
-        deny(f"No provider preference is configured for Peer route {route}.")
+        deny(f"No provider preference is configured for Peer route {provider_key}.")
     if provider != expected:
-        deny(f"Route {route} requires {expected}, not {provider}.")
+        deny(f"Route {provider_key} requires {expected}, not {provider}.")
     required_labels = {ROLE_LABEL: "peer", TASK_STATE_LABEL: "ASSIGNED"}
     for key, expected_value in required_labels.items():
         if labels.get(key) != expected_value:
             deny(f"Lead create_agent requires {key}: {expected_value}.")
-    required_thinking = ROUTE_THINKING.get(route)
+    if stack_profile == "budget" and labels.get(STACK_PROFILE_LABEL) != "budget":
+        deny("Budget Lead create_agent requires stack_profile: budget.")
+    required_thinking = peer_route_thinking(route, stack_profile)
     if required_thinking and settings.get("thinkingOptionId") != required_thinking:
         deny(f"Peer route {route} requires thinkingOptionId: {required_thinking}.")
     if provider.startswith("codex-peer/") and settings.get("modeId") != "full-access":
         deny("Codex Peer creation requires settings.modeId: full-access.")
+    if provider.startswith("opencode-peer/") and settings.get("modeId") != "build":
+        deny("OpenCode Peer creation requires settings.modeId: build.")
 
 
 def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any]) -> None:

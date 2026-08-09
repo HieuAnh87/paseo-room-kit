@@ -94,7 +94,7 @@ Thêm Lead-only `handback_to_parent` trong role proxy. Tool:
 
 - không nhận Supervisor ID;
 - resolve exact parent từ `paseo.parent-agent-id`;
-- chỉ chấp nhận parent active có `role=supervisor` hoặc canonical provider `codex-supervisor`/`claude-supervisor`;
+- chỉ chấp nhận parent active có `role=supervisor` hoặc canonical provider `codex-supervisor`/`claude-supervisor`/`opencode-supervisor`;
 - gửi final report background với reverse notification tắt;
 - không xuất hiện cho Supervisor/Peer.
 
@@ -105,3 +105,12 @@ Thêm Lead-only `handback_to_parent` trong role proxy. Tool:
 Giữ `planning` stable ở `codex-lead/gpt-5.6-sol`. Thêm route owner-explicit `planning_pilot` tới `claude-lead/claude-sonnet-5[1m]` High. Lead pilot dùng cùng lease, authority, Peer routing và final handback contract.
 
 Biến thể 1M chỉ là headroom. Claude runtime đặt `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`; Lead phải giữ trạng thái chính xác trong artifact bền vững và không xem compact summary là source of truth. Guard chỉ chấp nhận pilot khi creation có `lead_profile=pilot`; nếu không, stable route vẫn là bắt buộc.
+
+## D18 — Full budget stack được bind theo Supervisor identity
+
+Thêm `opencode-supervisor/aibox/deepseek-v4-flash` Max làm budget front door,
+`opencode-lead/aibox/glm-5.2` Max làm Lead, và DeepSeek V4 Flash Max cho mọi
+non-UI Peer. UI giữ `gemini-ui` qua agy. Guard bind bằng
+`lead_profile=budget` + `stack_profile=budget`: chỉ budget Supervisor tạo được
+budget Lead, và Lead đó luôn resolve `*_budget`. Stable Sol và Sonnet pilot
+không đổi.

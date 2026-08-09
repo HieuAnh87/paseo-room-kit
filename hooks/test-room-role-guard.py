@@ -26,12 +26,19 @@ class RoomRoleGuardTest(unittest.TestCase):
                     "providers": {
                         "planning": "codex-lead/gpt-5.6-sol",
                         "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
+                        "planning_budget": "opencode-lead/aibox/glm-5.2",
                         "impl": "opencode-peer/aibox/deepseek-v4-flash",
                         "impl_deep": "codex-peer/gpt-5.6-luna",
                         "search": "codex-peer/gpt-5.6-luna",
                         "ui": "gemini-ui/gemini-3.6-flash-medium",
                         "research": "opencode-peer/aibox/deepseek-v4-flash",
                         "audit": "codex-peer/gpt-5.6-luna",
+                        "impl_budget": "opencode-peer/aibox/deepseek-v4-flash",
+                        "impl_deep_budget": "opencode-peer/aibox/deepseek-v4-flash",
+                        "search_budget": "opencode-peer/aibox/deepseek-v4-flash",
+                        "ui_budget": "gemini-ui/gemini-3.6-flash-medium",
+                        "research_budget": "opencode-peer/aibox/deepseek-v4-flash",
+                        "audit_budget": "opencode-peer/aibox/deepseek-v4-flash",
                     }
                 }
             )
@@ -43,6 +50,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             {
                 "id": self.supervisor_id,
                 "workspaceId": "workspace-control",
+                "provider": "codex-supervisor",
                 "labels": {"role": "supervisor"},
             }
         )
@@ -50,8 +58,10 @@ class RoomRoleGuardTest(unittest.TestCase):
             {
                 "id": self.lead_id,
                 "workspaceId": "workspace-project",
+                "provider": "codex-lead",
                 "labels": {
                     "role": "lead",
+                    "stack_profile": "standard",
                     "paseo.parent-agent-id": self.supervisor_id,
                 },
             }
@@ -130,6 +140,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(output["updatedInput"]["labels"]["role"], "lead")
         self.assertEqual(output["updatedInput"]["labels"]["route"], "planning")
         self.assertEqual(output["updatedInput"]["labels"]["lead_profile"], "stable")
+        self.assertEqual(output["updatedInput"]["labels"]["stack_profile"], "standard")
         self.assertTrue(output["updatedInput"]["notifyOnFinish"])
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["state"], "pending")
@@ -153,6 +164,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["role"], "lead")
         self.assertEqual(updated["labels"]["route"], "planning")
         self.assertEqual(updated["labels"]["lead_profile"], "pilot")
+        self.assertEqual(updated["labels"]["stack_profile"], "standard")
         self.assertEqual(updated["settings"]["modeId"], "bypassPermissions")
         self.assertEqual(updated["settings"]["thinkingOptionId"], "high")
         lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
@@ -168,6 +180,78 @@ class RoomRoleGuardTest(unittest.TestCase):
                     "workspaceId": "workspace-pilot",
                     "title": "Pilot Lead",
                     "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_budget_supervisor_rewrites_glm_lead_contract(self) -> None:
+        self.write_agent(
+            {
+                "id": self.supervisor_id,
+                "workspaceId": "workspace-control",
+                "provider": "opencode-supervisor",
+                "labels": {"role": "supervisor"},
+            }
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "paseo_create_agent",
+                {
+                    "provider": "opencode-lead/aibox/glm-5.2",
+                    "workspaceId": "workspace-budget",
+                    "title": "Budget Lead",
+                    "initialPrompt": "Own the objective.",
+                    "labels": {"lead_profile": "budget"},
+                },
+            ),
+            self.supervisor_id,
+        )
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["labels"]["role"], "lead")
+        self.assertEqual(updated["labels"]["lead_profile"], "budget")
+        self.assertEqual(updated["labels"]["stack_profile"], "budget")
+        self.assertEqual(updated["settings"]["modeId"], "build")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
+        self.assertTrue(updated["notifyOnFinish"])
+
+    def test_budget_supervisor_cannot_create_stable_lead(self) -> None:
+        self.write_agent(
+            {
+                "id": self.supervisor_id,
+                "workspaceId": "workspace-control",
+                "provider": "opencode-supervisor",
+                "labels": {"role": "supervisor"},
+            }
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "paseo_create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-new",
+                    "title": "Lead",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_stable_supervisor_cannot_create_budget_lead(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "paseo_create_agent",
+                {
+                    "provider": "opencode-lead/aibox/glm-5.2",
+                    "workspaceId": "workspace-budget",
+                    "title": "Budget Lead",
+                    "initialPrompt": "Own the objective.",
+                    "labels": {"lead_profile": "budget"},
                 },
             ),
             self.supervisor_id,
@@ -209,6 +293,63 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.lead_id,
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_budget_lead_routes_non_ui_to_deepseek_max(self) -> None:
+        self.write_agent(
+            {
+                "id": self.lead_id,
+                "workspaceId": "workspace-budget",
+                "provider": "opencode-lead",
+                "labels": {
+                    "role": "lead",
+                    "stack_profile": "budget",
+                    "paseo.parent-agent-id": self.supervisor_id,
+                },
+            }
+        )
+        result = self.run_guard(
+            "lead",
+            self.pre(
+                "paseo_create_agent",
+                {
+                    "provider": "opencode-peer/aibox/deepseek-v4-flash",
+                    "title": "Audit",
+                    "initialPrompt": "Audit the result.",
+                    "labels": {"route": "audit"},
+                },
+            ),
+            self.lead_id,
+        )
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["labels"]["stack_profile"], "budget")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
+        self.assertEqual(updated["settings"]["modeId"], "build")
+
+    def test_budget_lead_keeps_ui_on_gemini_agy(self) -> None:
+        self.write_agent(
+            {
+                "id": self.lead_id,
+                "workspaceId": "workspace-budget",
+                "provider": "opencode-lead",
+                "labels": {"role": "lead", "stack_profile": "budget"},
+            }
+        )
+        result = self.run_guard(
+            "lead",
+            self.pre(
+                "paseo_create_agent",
+                {
+                    "provider": "gemini-ui/gemini-3.6-flash-medium",
+                    "title": "UI",
+                    "initialPrompt": "Polish the UI.",
+                    "labels": {"route": "ui"},
+                },
+            ),
+            self.lead_id,
+        )
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["labels"]["stack_profile"], "budget")
+        self.assertNotIn("thinkingOptionId", updated["settings"])
 
     def test_peer_cannot_use_paseo(self) -> None:
         result = self.run_guard(

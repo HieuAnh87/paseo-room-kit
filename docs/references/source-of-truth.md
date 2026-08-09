@@ -44,4 +44,4 @@
 | Path | Vai trò |
 |---|---|
 | `~/.local/share/antigravity-acp/` | cloned ACP source, dependencies, compiled binary and sibling `agy` |
-| `~/.config/opencode/paseo-peer.json` | OpenCode Peer config; currently intentionally minimal |
+| `~/.config/opencode/paseo-{supervisor,lead,peer}.json` | OpenCode role config; Supervisor/Lead có role proxy, Peer không có control MCP |

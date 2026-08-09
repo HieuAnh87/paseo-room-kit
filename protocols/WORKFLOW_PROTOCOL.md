@@ -19,7 +19,8 @@ Supervisor creates a Lead with:
 
 - `role=lead`
 - `route=planning`
-- `lead_profile=stable|pilot`
+- `lead_profile=stable|pilot|budget`
+- `stack_profile=standard|budget`
 - `task_state=LEASED`
 
 After a successful final handback, the proxy changes the Lead to:
@@ -30,6 +31,7 @@ Lead creates a Peer with:
 
 - `role=peer`
 - `route=impl|impl_deep|search|ui|research|audit`
+- `stack_profile=standard|budget`
 - `task_state=ASSIGNED`
 
 The role-aware MCP proxy invokes the guard, canonicalizes these labels, and forces `notifyOnFinish=true`. Paseo owns `paseo.parent-agent-id`.
@@ -99,8 +101,10 @@ This explicit handback is event-driven. It does not use polling, schedules, or h
 
 Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 
-- Supervisor uses `planning` and `lead_profile=stable` by default. It may use `planning_pilot` and `lead_profile=pilot` only after an explicit Human request; the canonical Lead route label remains `planning`.
-- Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model and normalizes required thinking.
+- Codex/Claude Supervisor uses `planning` and `lead_profile=stable` by default. It may use `planning_pilot` and `lead_profile=pilot` only after an explicit Human request; both use `stack_profile=standard`.
+- The OpenCode DeepSeek budget Supervisor is a separate front door. It may create only `planning_budget` with `lead_profile=budget` and `stack_profile=budget`; other Supervisors may not create that Lead.
+- A budget Lead resolves every Peer category through its `*_budget` route. Non-UI routes use DeepSeek V4 Flash Max; `ui_budget` remains Gemini through agy.
+- Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model, propagates the stack profile, and normalizes required thinking.
 - Stock providers are invalid for internal Lead or Peer seats.
 - Room launchers shadow the direct Paseo CLI; internal orchestration must use the role-aware MCP proxy.
 

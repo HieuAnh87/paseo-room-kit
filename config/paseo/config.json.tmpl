@@ -319,6 +319,52 @@
           }
         ]
       },
+      "opencode-supervisor": {
+        "extends": "acp",
+        "label": "AI Box Supervisor · Budget",
+        "description": "Human-facing budget Supervisor using DeepSeek V4 Flash",
+        "command": [
+          "{{HOME}}/.local/bin/opencode-paseo-room",
+          "supervisor"
+        ],
+        "models": [
+          {
+            "id": "aibox/deepseek-v4-flash",
+            "label": "DeepSeek V4 Flash · AI Box",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "opencode-lead": {
+        "extends": "acp",
+        "label": "AI Box GLM Lead · Budget",
+        "description": "Budget engineering Lead using GLM 5.2",
+        "command": [
+          "{{HOME}}/.local/bin/opencode-paseo-room",
+          "lead"
+        ],
+        "models": [
+          {
+            "id": "aibox/glm-5.2",
+            "label": "GLM 5.2 · AI Box",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "max",
+                "label": "Max",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
       "gemini-ui": {
         "extends": "acp",
         "label": "Gemini UI · Antigravity ACP",

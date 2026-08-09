@@ -48,7 +48,7 @@ Tài liệu này là bản giải thích và snapshot; các file dưới đây m
 | Runtime materializer | `~/.local/bin/codex-room-sync` |
 | Role-aware Paseo MCP proxy | `~/.local/bin/paseo-room-mcp` |
 | Shared route/lease policy | `~/.codex/hooks/room-role-guard.py` |
-| OpenCode Peer wrapper | `~/.local/bin/opencode-paseo-peer` |
+| OpenCode role wrapper | `~/.local/bin/opencode-paseo-room` |
 | Shared workflow contract | `WORKFLOW_PROTOCOL.md` |
 | Lead lease registry | `lead-leases.json` |
 | Gemini ACP installation | `~/.local/share/antigravity-acp/` |

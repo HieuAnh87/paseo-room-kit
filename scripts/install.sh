@@ -99,7 +99,7 @@ install_file "${repo_root}/hooks/room-role-guard.py" \
 install_file "${repo_root}/hooks/test-room-role-guard.py" \
   "${target_home}/.codex/hooks/test-room-role-guard.py" 644
 
-for executable in claude-room codex-room codex-room-sync paseo-room-mcp opencode-paseo-peer; do
+for executable in claude-room codex-room codex-room-sync paseo-room-mcp opencode-paseo-room opencode-paseo-peer; do
   install_file "${repo_root}/bin/${executable}" \
     "${target_home}/.local/bin/${executable}" 755
 done
@@ -108,6 +108,12 @@ install_file "${repo_root}/bin/paseo-room-deny" \
 
 install_file "${repo_root}/config/opencode/paseo-peer.json" \
   "${target_home}/.config/opencode/paseo-peer.json" 600
+for role in supervisor lead; do
+  install_file "${repo_root}/config/opencode/paseo-${role}.json.tmpl" \
+    "${target_home}/.config/opencode/paseo-${role}.json" 600 render
+  install_file "${repo_root}/config/opencode/paseo-${role}.instructions.md.tmpl" \
+    "${target_home}/.config/opencode/paseo-${role}.instructions.md" 600 render
+done
 install_file "${repo_root}/protocols/WORKFLOW_PROTOCOL.md" \
   "${target_home}/.config/room-workflow/WORKFLOW_PROTOCOL.md" 644
 install_file "${repo_root}/protocols/DISSENT_PROTOCOL.md" \

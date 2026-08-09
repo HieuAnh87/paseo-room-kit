@@ -22,8 +22,9 @@ Codex lọc `PASEO_AGENT_ID` khi launch stdio MCP subprocess. Proxy ưu tiên en
 
 Guard trước upstream:
 
-- Supervisor `create_agent` mặc định chỉ chấp nhận exact `planning`; `planning_pilot` cần explicit `lead_profile=pilot`;
-- Lead phải khai báo `route` và dùng exact provider/model từ orchestration preferences;
+- Codex/Claude Supervisor `create_agent` mặc định chỉ chấp nhận exact `planning`; `planning_pilot` cần explicit `lead_profile=pilot`;
+- OpenCode budget Supervisor chỉ chấp nhận `planning_budget` với `lead_profile=budget` và `stack_profile=budget`; Supervisor khác không được tạo budget Lead;
+- Lead phải khai báo `route` và dùng exact provider/model từ orchestration preferences; budget Lead được guard chuyển sang exact `*_budget` route;
 - canonicalize role, route, Lead profile, task state, thinking, provider-specific unattended mode và `notifyOnFinish`;
 - Peer deny toàn bộ Paseo tools;
 - mutation vào agent khác phải đúng parent→child và expected role.

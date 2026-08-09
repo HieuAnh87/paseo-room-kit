@@ -15,7 +15,7 @@ The repository contains role profiles, provider routing, the role-aware Paseo MC
 - Lead is the sole engineering owner inside one project workspace.
 - Peer performs one bounded assignment and returns evidence to Lead.
 - Supervisor and Lead receive the role-aware Paseo MCP proxy.
-- The Human can choose either the Codex Supervisor or the isolated Claude Opus Supervisor front door.
+- The Human can choose Codex, isolated Claude Opus, or the DeepSeek budget Supervisor front door.
 - Peer receives no Paseo control MCP.
 - Final Lead result uses `handback_to_parent`; Lead never supplies a Supervisor ID.
 - Native runtime state such as `idle` or `DONE` is not engineering acceptance.
@@ -44,6 +44,12 @@ parallel Human-facing front door. Stable Lead routing remains
 `claude-lead/claude-sonnet-5[1m]` at High with a 300K auto-compact window;
 selecting Claude for the Supervisor still does not transfer engineering
 ownership into the Supervisor.
+
+The budget front door is `opencode-supervisor/aibox/deepseek-v4-flash` at Max.
+Selecting it deterministically activates the full budget stack:
+`opencode-lead/aibox/glm-5.2` Max for Lead, DeepSeek V4 Flash Max for every
+non-UI Peer route, and Gemini through agy for UI. It cannot silently fall back
+to the stable or Sonnet stack.
 
 ## Existing-machine update
 

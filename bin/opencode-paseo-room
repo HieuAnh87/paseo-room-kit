@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+role="${1:?room role is required}"
+shift
+
+case "$role" in
+  supervisor|lead|peer) ;;
+  *)
+    printf 'unsupported OpenCode room role: %s\n' "$role" >&2
+    exit 2
+    ;;
+esac
+
+opencode_bin="${OPENCODE_BIN:-$(command -v opencode)}"
+role_config="${HOME}/.config/opencode/paseo-${role}.json"
+
+if [[ ! -r "$role_config" ]]; then
+  printf 'missing OpenCode room config: %s\n' "$role_config" >&2
+  exit 2
+fi
+
+export OPENCODE_CONFIG="$role_config"
+export OPENCODE_CONFIG_CONTENT="$(<"$role_config")"
+export PASEO_ROOM_ROLE="$role"
+export PATH="${HOME}/.local/share/paseo-room-bin:${PATH}"
+
+exec "$opencode_bin" --pure acp "$@"

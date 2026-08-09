@@ -87,6 +87,20 @@ class PortabilityTest(unittest.TestCase):
         )
         self.assertIn("Agent", claude_lead["disallowedTools"])
 
+        opencode_supervisor = value["agents"]["providers"]["opencode-supervisor"]
+        self.assertEqual(opencode_supervisor["extends"], "acp")
+        self.assertEqual(
+            opencode_supervisor["models"][0]["id"],
+            "aibox/deepseek-v4-flash",
+        )
+        opencode_lead = value["agents"]["providers"]["opencode-lead"]
+        self.assertEqual(opencode_lead["extends"], "acp")
+        self.assertEqual(opencode_lead["models"][0]["id"], "aibox/glm-5.2")
+        self.assertEqual(
+            opencode_lead["models"][0]["thinkingOptions"][0]["id"],
+            "max",
+        )
+
         for role in ("supervisor", "lead", "peer"):
             text = (
                 ROOT / f"config/codex/{role}.config.toml.tmpl"
@@ -103,6 +117,24 @@ class PortabilityTest(unittest.TestCase):
                 if name.endswith(".json"):
                     json.loads(text)
 
+        for role in ("supervisor", "lead"):
+            text = (
+                ROOT / f"config/opencode/paseo-{role}.json.tmpl"
+            ).read_text().replace("{{HOME}}", str(home))
+            self.assertNotIn("{{", text)
+            opencode = json.loads(text)
+            self.assertEqual(opencode["default_agent"], "build")
+            self.assertEqual(opencode["permission"]["task"], "deny")
+            self.assertEqual(
+                opencode["mcp"]["paseo"]["command"][-1],
+                role,
+            )
+
+            instructions = (
+                ROOT / f"config/opencode/paseo-{role}.instructions.md.tmpl"
+            ).read_text().replace("{{HOME}}", str(home))
+            self.assertNotIn("{{", instructions)
+
     def test_runtime_state_templates_are_empty(self) -> None:
         leases = json.loads((ROOT / "templates/lead-leases.empty.json").read_text())
         self.assertEqual(leases, {"version": 1, "leases": {}})
@@ -114,6 +146,7 @@ class PortabilityTest(unittest.TestCase):
             ROOT / "bin/codex-room-sync",
             ROOT / "bin/paseo-room-mcp",
             ROOT / "bin/opencode-paseo-peer",
+            ROOT / "bin/opencode-paseo-room",
             ROOT / "bin/paseo-room-deny",
             ROOT / "scripts/install.sh",
             ROOT / "scripts/install-antigravity-acp.sh",

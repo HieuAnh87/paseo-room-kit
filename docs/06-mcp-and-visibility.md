@@ -21,11 +21,11 @@ Paseo `0.2.5` không hỗ trợ `injectIntoProviders`. Field này từng có tro
 
 Selective authority được cấp lại có chủ đích:
 
-- `codex-supervisor`, `claude-supervisor`, `codex-lead` và `claude-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
+- `codex-supervisor`, `claude-supervisor`, `opencode-supervisor`, `codex-lead`, `claude-lead` và `opencode-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
 - proxy forward tới `http://127.0.0.1:6767/mcp/agents?callerAgentId=...` sau khi kiểm tra role, route, ownership và lease;
 - Lead còn thấy synthetic tool `handback_to_parent`; tool tự resolve đúng parent Supervisor và không nhận `agentId` từ Lead;
 - `codex-peer` không có Paseo MCP server;
-- OpenCode Peer deny `paseo_*` và direct Paseo CLI trong permission config;
+- OpenCode Supervisor/Lead deny native `task`, dùng role proxy cho `paseo_*`; OpenCode Peer deny cả `paseo_*` và direct Paseo CLI;
 - `gemini-ui` khai báo `params.supportsMcpServers=false`;
 - room launchers prepend một `paseo` CLI wrapper chỉ cho phép lifecycle bridge `paseo hooks codex`, còn lại deny.
 

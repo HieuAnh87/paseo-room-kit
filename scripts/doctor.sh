@@ -34,6 +34,7 @@ python3 -m py_compile \
 bash -n \
   "${repo_root}/bin/claude-room" \
   "${repo_root}/bin/codex-room" \
+  "${repo_root}/bin/opencode-paseo-room" \
   "${repo_root}/bin/opencode-paseo-peer" \
   "${repo_root}/bin/paseo-room-deny" \
   "${repo_root}/scripts/install.sh" \

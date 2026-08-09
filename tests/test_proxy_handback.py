@@ -75,6 +75,17 @@ class HandbackTest(unittest.TestCase):
         self.assertTrue(result["result"]["isError"])
         self.assertEqual(self.calls, [])
 
+    def test_budget_supervisor_is_accepted_as_canonical_parent(self) -> None:
+        self.parent["provider"] = "opencode-supervisor"
+        result = self.module.handback_to_parent(
+            "lead-one",
+            "lead",
+            3,
+            {"message": "budget stack validated outcome"},
+        )
+        self.assertFalse(result["result"]["isError"])
+        self.assertEqual(self.calls[0]["name"], "send_agent_prompt")
+
 
 if __name__ == "__main__":
     unittest.main()

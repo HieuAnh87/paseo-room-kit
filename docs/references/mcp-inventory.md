@@ -32,6 +32,8 @@ Nguồn: `~/.codex/config.toml`. Giá trị secret/env/auth không được ché
 | `codex-lead` | yes, qua role proxy | yes, via role runtime baseline |
 | `codex-peer` | no | baseline is materialized by `codex-room-sync` |
 | `opencode-peer` | no | not inherited from Codex baseline; own OpenCode config |
+| `opencode-supervisor` | yes, qua role proxy | own OpenCode role config |
+| `opencode-lead` | yes, qua role proxy | own OpenCode role config |
 | `gemini-ui` | no | Antigravity/agy side has its own provider boundary |
 
 Global Paseo `injectIntoAgents=false` đã được daemon nạp sau restart có chủ đích. Supervisor/Lead lấy control MCP qua role proxy; không dựa vào global injection.

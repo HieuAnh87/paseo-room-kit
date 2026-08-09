@@ -348,7 +348,8 @@ def handback_to_parent(
         and parent_labels.get("role") == "supervisor"
     ) or (
         isinstance(parent, dict)
-        and parent.get("provider") in {"codex-supervisor", "claude-supervisor"}
+        and parent.get("provider")
+        in {"codex-supervisor", "claude-supervisor", "opencode-supervisor"}
     )
     if (
         not parent_is_supervisor
