@@ -86,6 +86,32 @@ class HandbackTest(unittest.TestCase):
         self.assertFalse(result["result"]["isError"])
         self.assertEqual(self.calls[0]["name"], "send_agent_prompt")
 
+    def test_anonymous_catalog_probe_exposes_no_control_tools(self) -> None:
+        initialized = self.module.handle(
+            "",
+            "supervisor",
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+        )
+        listed = self.module.handle(
+            "",
+            "supervisor",
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        )
+        called = self.module.handle(
+            "",
+            "supervisor",
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "list_agents", "arguments": {}},
+            },
+        )
+        self.assertEqual(initialized["result"]["serverInfo"]["name"], "paseo-room-supervisor")
+        self.assertEqual(listed["result"]["tools"], [])
+        self.assertTrue(called["result"]["isError"])
+        self.assertIn("PASEO_AGENT_ID", called["result"]["content"][0]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

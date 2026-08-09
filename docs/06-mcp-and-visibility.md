@@ -26,6 +26,7 @@ Selective authority được cấp lại có chủ đích:
 - Lead còn thấy synthetic tool `handback_to_parent`; tool tự resolve đúng parent Supervisor và không nhận `agentId` từ Lead;
 - `codex-peer` không có Paseo MCP server;
 - OpenCode Supervisor/Lead deny native `task`, dùng role proxy cho `paseo_*`; OpenCode Peer deny cả `paseo_*` và direct Paseo CLI;
+- ACP catalog probe chạy trước khi có agent identity chỉ thấy MCP catalog rỗng; session thật phải resolve được `PASEO_AGENT_ID` mới nhận control tools;
 - `gemini-ui` khai báo `params.supportsMcpServers=false`;
 - room launchers prepend một `paseo` CLI wrapper chỉ cho phép lifecycle bridge `paseo hooks codex`, còn lại deny.
 

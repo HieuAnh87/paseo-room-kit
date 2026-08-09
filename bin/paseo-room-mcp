@@ -489,6 +489,13 @@ def handle(agent_id: str, role: str, request: dict[str, Any]) -> dict[str, Any] 
         return None
     if method == "ping":
         return {"jsonrpc": "2.0", "id": request_id, "result": {}}
+    # Paseo probes ACP catalogs before an agent exists. Let that anonymous,
+    # read-only probe initialize OpenCode without exposing any control tools.
+    # Real room sessions still require a resolvable Paseo agent identity.
+    if not agent_id and method == "tools/list":
+        return {"jsonrpc": "2.0", "id": request_id, "result": {"tools": []}}
+    if not agent_id and method == "tools/call":
+        return denied_tool_result(request_id, "PASEO_AGENT_ID is required")
     if method == "tools/list":
         return list_tools(agent_id, role, request_id)
     if method == "tools/call":
@@ -506,8 +513,6 @@ def main() -> None:
         fail("usage: paseo-room-mcp supervisor|lead|peer")
     role = sys.argv[1]
     agent_id = resolve_agent_id()
-    if not agent_id:
-        fail("PASEO_AGENT_ID is required")
     while True:
         request = read_message()
         if request is None:
