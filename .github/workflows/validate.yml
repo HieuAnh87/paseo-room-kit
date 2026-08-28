@@ -14,3 +14,5 @@ jobs:
           python-version: "3.12"
       - name: Validate portable kit
         run: ./scripts/doctor.sh --repo
+      - name: Validate public export contract
+        run: python3 tests/test_public_export.py

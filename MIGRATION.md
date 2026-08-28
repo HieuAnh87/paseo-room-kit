@@ -77,3 +77,28 @@ Keep these outside Git:
 - API keys and auth headers;
 - Paseo agent/workspace records and daemon logs;
 - Supervisor notebook and active lease state.
+
+## Publish the generic public candidate
+
+The public exporter has its own explicit allowlist and writes only to a
+caller-selected new or empty directory. Review and scan that directory before
+starting a fresh publication repository:
+
+```bash
+python3 scripts/export_public_kit.py /tmp/public-room-kit
+python3 scripts/check_public_artifact.py /tmp/public-room-kit
+cd /tmp/public-room-kit
+git init
+git status --short
+git add .
+git diff --cached --check
+git diff --cached
+git commit -m "Publish generic room-kit examples"
+```
+
+Do not copy the private repository's history, configure a remote, or push from
+the export workflow. Add a remote and publish only after an owner reviews the
+candidate, manifest, scanner result, and staged diff; supplies the future
+repository owner and name; confirms whether to publish; and chooses visibility
+and licensing. If a correction is
+needed, export to a fresh empty directory and repeat the review.
