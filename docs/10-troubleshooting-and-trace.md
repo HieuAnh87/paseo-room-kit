@@ -116,7 +116,7 @@ Xem [06-mcp-and-visibility.md](06-mcp-and-visibility.md). Đừng nhầm:
 
 ## Peer xong nhưng Supervisor không nhận final Lead result
 
-Đây không nhất thiết là mất event. `notifyOnFinish` của Paseo `0.2.5` gắn với turn được create/prompt:
+Đây không nhất thiết là mất event. `notifyOnFinish` của Paseo `0.8.0` gắn với turn được create/prompt:
 
 ```text
 Supervisor prompts Lead

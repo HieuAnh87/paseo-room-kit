@@ -29,3 +29,22 @@ from the export workflow. Add a remote and publish only after an owner has
 supplied the intended repository owner and name, confirmed whether to publish,
 chosen the visibility and license, and reviewed the staged candidate. If a correction is needed, change the
 allowlisted source, export to a fresh empty directory, and repeat validation.
+
+The installer applies role-only PATH guards to `~/.zshenv`, `~/.zprofile`,
+and `~/.zshrc`; it never restarts the Paseo daemon. Existing startup files are
+backed up only when their managed block materially changes, and `--force` is
+not required for this repair.
+
+Before activating an existing installation, review that all custom internal
+providers have `paseoTools.enabled=false` and that installed proxy, guard,
+protocol, and rendered Supervisor/Lead templates match canonical sources.
+Version-1 leases migrate lazily; never copy active leases, decision history,
+Peer callback receipts, credentials, agent records, or host identity.
+
+After a deliberate restart, use `inspect_slp_ownership` to identify legacy
+orphan Leads by workspace + parentage + lease. Use digest-fenced
+`retire_legacy_lead` only after explicit Human-authorized checkpoint or
+replacement. If an expected Peer callback does not render, invoke
+`recover_peer_callbacks` once; do not replace event-driven operation with
+polling. No plugin migration is required, and any future plugin must remain a
+thin UI over protected operations.

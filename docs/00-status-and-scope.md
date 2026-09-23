@@ -10,12 +10,12 @@ Setup hiện tại đã có đủ topology Human-facing Supervisor → Lead → 
 
 | Hạng mục | Giá trị tại thời điểm chụp |
 |---|---|
-| Paseo CLI/daemon | `0.2.5` |
+| Paseo CLI/daemon | `0.8.0` |
 | Listen | `127.0.0.1:6767` |
 | Daemon | running/reachable |
 | Relay | enabled, `wss://relay.paseo.sh:443` |
-| Paseo MCP | enabled; daemon đã nạp `injectIntoAgents=false` sau restart có chủ đích |
-| Selective authority | Supervisor/Lead dùng role-aware MCP proxy; Peer không có Paseo MCP; OpenCode permission; Gemini ACP MCP disabled |
+| Paseo MCP | enabled; canonical config giữ `injectIntoAgents=false` và per-provider `paseoTools.enabled=false` |
+| Selective authority | mọi internal provider deny native Paseo catalog; Supervisor/Lead dùng role-aware MCP proxy; Peer không có control MCP |
 | Browser tools | enabled |
 | Auto archive after merge | disabled |
 | Terminal agent hooks | enabled |

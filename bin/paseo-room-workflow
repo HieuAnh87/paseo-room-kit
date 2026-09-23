@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+"""Human-facing repository setup and protected workflow operations."""
+from __future__ import annotations
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import pathlib
+import sys
+
+import room_workflow as workflow
+
+
+def proxy_module():
+    loader = importlib.machinery.SourceFileLoader("room_proxy", str(pathlib.Path(__file__).with_name("paseo-room-mcp")))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    init = commands.add_parser("init", help="create missing repo tactics; dry-run by default")
+    init.add_argument("repository", type=pathlib.Path)
+    init.add_argument("--apply", action="store_true")
+    candidate = commands.add_parser("snapshot", help="read-only Git candidate identity")
+    candidate.add_argument("repository", type=pathlib.Path)
+    bind = commands.add_parser("bind", help="Human binds an existing root Lead; never creates an agent")
+    bind.add_argument("--lead-id", required=True)
+    bind.add_argument("--supervisor-id")
+    bind.add_argument("--task-class", default="bounded")
+    bind.add_argument("--apply", action="store_true")
+    commands.add_parser("decisions", help="read the Human decision queue")
+    commands.add_parser("bindings", help="inspect canonical authority versions, including working rooms")
+    for name in ("decide", "reopen", "resolve", "archive", "withdraw"):
+        operation = commands.add_parser(name, help="protected Human operation; dry-run by default")
+        operation.add_argument("request", type=pathlib.Path, help="JSON arguments copied from the current queue")
+        operation.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    # Cooperative owner-shell separation; this is not OS authentication.
+    if args.command != "snapshot" and os.environ.get("PASEO_ROOM_ROLE"):
+        raise workflow.WorkflowError("Human setup/control requires an ordinary owner shell, outside a managed role")
+    if args.command == "snapshot":
+        result = workflow.snapshot(args.repository)
+    elif args.command == "init":
+        root = args.repository.resolve(strict=True)
+        if not root.is_dir() or (root / ".orchestration").is_symlink():
+            raise workflow.WorkflowError("Repository must be a directory with a regular orchestration directory")
+        templates = {
+            "workflow.json": json.dumps(workflow.default_policy(), indent=2) + "\n",
+            "workspace-protocol.md": (
+                "# Workspace Protocol\n\n"
+                "Human owns product, external effects and authority changes. Lead owns technical judgment, integration and evidence.\n\n"
+                "## Project and authority\n\n"
+                "Record project identity, scope, cost limits, allowed edits and owner-reserved decisions here. Omission grants no authority.\n\n"
+                "## Task classes\n\n"
+                "Machine gates live in workflow.json. Use read_only for inspection, tiny for tightly coupled self-work, bounded for ordinary Peer work, sensitive for lifecycle/security/migration, foundation for costly design decisions. Adapt these tactics to actual risk.\n\n"
+                "## Ownership and judgment\n\n"
+                "One writer per moving scope; use separate worktrees or serialize. Give neutral briefs, allow REOPEN_REQUEST/DEPENDENCY_REQUEST/BLOCKED. Use independent advisers only for decision-changing questions.\n\n"
+                "## Proof and acceptance\n\n"
+                "Record exact checks and their limits. Pause writers during review. Bind report/verdict to a candidate digest. Changes invalidate old reviews. Tests verify established contracts; they do not invent undecided APIs. Human acceptance remains separate from Lead technical judgment.\n\n"
+                "## Supervision and improvement\n\n"
+                "Observe material events; ask evidence-backed questions without taking project authority. Record causal failures before proposing protocol changes.\n"
+            ),
+        }
+        planned = []
+        for name, content in templates.items():
+            path = root / ".orchestration" / name
+            if path.is_symlink() or (path.exists() and not path.is_file()):
+                raise workflow.WorkflowError("Repository tactics must be regular files")
+            planned.append({"path": str(path), "action": "keep" if path.exists() else "create"})
+        if args.apply:
+            for item, content in zip(planned, templates.values()):
+                if item["action"] == "create":
+                    path = pathlib.Path(item["path"])
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    with path.open("x") as stream:
+                        stream.write(content)
+        result = {"applied": args.apply, "files": planned}
+    else:
+        proxy = proxy_module()
+        if args.command == "bind":
+            result = proxy.bind_root_lead(args.lead_id, args.supervisor_id, args.task_class, apply=args.apply)
+        elif args.command == "decisions":
+            result = proxy.list_slp_decisions("human", "human", "human-queue", {})
+        elif args.command == "bindings":
+            with proxy.locked_leases() as registry:
+                fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest")
+                result = {"bindings": [{key: lease.get(key) for key in fields} for lease in registry["leases"].values()]}
+        else:
+            request = json.loads(args.request.read_text())
+            if not isinstance(request, dict):
+                raise workflow.WorkflowError("Request must be a JSON object")
+            if args.command == "withdraw":
+                result = proxy.withdraw_binding(request, apply=args.apply)
+            elif not args.apply:
+                result = {"applied": False, "operation": args.command, "arguments": request}
+            else:
+                operation = {"decide": proxy.record_slp_decision, "reopen": proxy.reopen_work_epoch,
+                             "resolve": proxy.resolve_slp_delivery, "archive": proxy.archive_slp_workspace}[args.command]
+                result = operation("human", "human", "human-" + args.command, request)
+    print(json.dumps(result, indent=2, sort_keys=True))
+    if isinstance(result, dict) and ("error" in result or result.get("result", {}).get("isError")):
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (ValueError, OSError, RuntimeError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)

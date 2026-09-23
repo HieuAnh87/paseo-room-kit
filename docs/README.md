@@ -3,7 +3,7 @@
 Bộ tài liệu này mô tả toàn bộ setup Paseo hiện tại trên máy `$HOME`, gồm:
 
 - daemon, provider registry và MCP injection;
-- mô hình Human → Supervisor → Lead → Peer;
+- authority binding độc lập provider, với Supervisor tùy chọn;
 - vai trò, quyền hạn, handback, dissent, heartbeat và lifecycle;
 - routing model cho Codex, OpenCode/AI Box, DeepSeek, GLM, Gemini và Claude;
 - `codex-room`/`codex-room-sync` và runtime isolation;
@@ -30,6 +30,7 @@ Bộ tài liệu này mô tả toàn bộ setup Paseo hiện tại trên máy `$
 | Đánh giá toàn bộ 38 session đã chạy | [14-session-audit-2026-08-03.md](14-session-audit-2026-08-03.md) |
 | Guard, lease và terminal-state mới | [15-role-guard-and-lease.md](15-role-guard-and-lease.md) |
 | Context window và compaction cho Lead | [16-context-window-and-compaction-research.md](16-context-window-and-compaction-research.md) |
+| Workflow chung, direct Lead, candidate review và drift | [17-provider-independent-workflow.md](17-provider-independent-workflow.md) |
 | Workspace/agent records hiện có | [references/runtime-inventory.md](references/runtime-inventory.md) |
 
 ## Source of truth
@@ -47,6 +48,8 @@ Tài liệu này là bản giải thích và snapshot; các file dưới đây m
 | Codex launcher | `~/.local/bin/codex-room` |
 | Runtime materializer | `~/.local/bin/codex-room-sync` |
 | Role-aware Paseo MCP proxy | `~/.local/bin/paseo-room-mcp` |
+| Shared authority/evidence contracts | `~/.local/bin/room_workflow.py` |
+| Human workflow CLI | `~/.local/bin/paseo-room-workflow` |
 | Shared route/lease policy | `~/.codex/hooks/room-role-guard.py` |
 | OpenCode role wrapper | `~/.local/bin/opencode-paseo-room` |
 | Shared workflow contract | `WORKFLOW_PROTOCOL.md` |
@@ -55,7 +58,9 @@ Tài liệu này là bản giải thích và snapshot; các file dưới đây m
 
 ## Snapshot policy
 
-Snapshot được chụp ngày `2026-08-03` lúc khoảng `18:55` (Asia/Ho_Chi_Minh), khi Paseo daemon `0.2.5` đang chạy.
+Inventory snapshot rộng được chụp ngày `2026-08-03` lúc khoảng `18:55`
+(Asia/Ho_Chi_Minh) và có thể stale. Paseo baseline riêng đã được revalidate và
+pin ở `0.8.0`; dùng doctor live để xác nhận runtime hiện tại.
 
 Portable kit không commit `snapshots/`: chúng chứa runtime identity, đường dẫn và trạng thái dễ lỗi thời. Chạy `../scripts/doctor.sh --live` trên từng máy để kiểm tra routing/runtime. `auth.json`, URI database, API key, token, password và secret environment luôn nằm ngoài repository.
 

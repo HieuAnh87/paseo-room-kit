@@ -1,6 +1,8 @@
 # 02 — Topology và authority
 
-## Luồng đúng
+## Đường bootstrap tương thích
+
+Một đường khác hợp lệ là Human → root Lead → Peer. Human có thể bind thêm root Supervisor làm observer mà không reparent Lead. Mọi operation managed kiểm tra binding, không suy quyền từ topology.
 
 ```text
 Human đặt objective
@@ -24,7 +26,7 @@ Human đặt objective
 
 ## Supervisor là cửa trước
 
-Human chỉ nên giao tiếp với Supervisor. Supervisor relay objective/decision/constraint/reporting contract cho Lead. Lead và Peer không cần biết provider, implementation hoặc MCP control channel của Supervisor.
+Human chọn giao tiếp trực tiếp với Lead hoặc qua Supervisor theo binding hiện tại. Supervisor relay objective/decision/constraint/reporting contract cho Lead. Lead và Peer không cần biết provider, implementation hoặc MCP control channel của Supervisor.
 
 Đây là interface isolation:
 
@@ -58,4 +60,6 @@ Không để hai Lead cùng điều hành một workspace. Stock `codex/...` Lea
 - Agent có tên đúng nhưng provider là stock `codex/...`.
 - Cùng workspace có hai Lead active.
 - Dissent bị coi là veto hoặc bị bỏ qua không có evidence.
-- Human bị đẩy xuống nói chuyện trực tiếp với Lead chỉ vì Supervisor relay không hoạt động.
+- Agent tự đổi authority binding hoặc bypass epoch khi relay gặp lỗi.
+
+Để bật gates theo repo, bind root Lead và xử lý drift/replacement, xem [workflow chung](17-provider-independent-workflow.md).

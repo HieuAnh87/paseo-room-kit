@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import plistlib
 import re
 import stat
+import struct
 import tempfile
 import tomllib
 import unittest
@@ -64,6 +67,25 @@ class PortabilityTest(unittest.TestCase):
         value = json.loads(paseo)
         self.assertTrue(value["daemon"]["mcp"]["enabled"])
         self.assertFalse(value["daemon"]["mcp"]["injectIntoAgents"])
+        internal_slp_providers = {
+            "claude-supervisor",
+            "codex-supervisor",
+            "codex-lead",
+            "claude-lead",
+            "codex-peer",
+            "opencode-peer",
+            "opencode-supervisor",
+            "opencode-lead",
+            "gemini-ui",
+        }
+        self.assertEqual(
+            {
+                name
+                for name, provider in value["agents"]["providers"].items()
+                if provider.get("paseoTools") == {"enabled": False}
+            },
+            internal_slp_providers,
+        )
         claude_supervisor = value["agents"]["providers"]["claude-supervisor"]
         self.assertEqual(claude_supervisor["extends"], "claude")
         self.assertEqual(
@@ -135,9 +157,64 @@ class PortabilityTest(unittest.TestCase):
             ).read_text().replace("{{HOME}}", str(home))
             self.assertNotIn("{{", instructions)
 
+    def test_installed_paseo_08_provider_policy_schema_when_available(self) -> None:
+        app = pathlib.Path(
+            os.environ.get("PASEO_APP_PATH", "/Applications/Paseo.app")
+        )
+        plist_path = app / "Contents/Info.plist"
+        asar_path = app / "Contents/Resources/app.asar"
+        if not plist_path.is_file() or not asar_path.is_file():
+            self.skipTest("installed Paseo application bundle is unavailable")
+        with plist_path.open("rb") as stream:
+            version = plistlib.load(stream)["CFBundleShortVersionString"]
+        expected = json.loads((ROOT / "versions.lock.json").read_text())["paseo"]
+        self.assertEqual(version, expected)
+        self.assertEqual(version, "0.8.0")
+
+        data = asar_path.read_bytes()
+        header_length = struct.unpack("<I", data[12:16])[0]
+        header = json.loads(data[16 : 16 + header_length])
+        data_offset = 8 + struct.unpack("<I", data[4:8])[0]
+
+        def asar_text(relative: str) -> str:
+            node = header
+            for component in relative.split("/"):
+                node = node["files"][component]
+            offset = data_offset + int(node["offset"])
+            return data[offset : offset + node["size"]].decode()
+
+        schema = asar_text(
+            "node_modules/@getpaseo/protocol/dist/provider-config.js"
+        )
+        policy = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/"
+            "paseo-tool-policy.js"
+        )
+        manager = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/"
+            "agent-manager.js"
+        )
+        bootstrap = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/bootstrap.js"
+        )
+        paseo_tools = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/tools/"
+            "paseo-tools.js"
+        )
+        self.assertIn("paseoTools: ProviderPaseoToolsPolicySchema.optional()", schema)
+        self.assertIn("enabled: z.boolean().optional()", schema)
+        self.assertIn("policy?.enabled !== false", policy)
+        self.assertGreaterEqual(manager.count("isPaseoToolPolicyEnabled"), 3)
+        self.assertGreaterEqual(manager.count("withRuntimePaseoMcpServer"), 2)
+        self.assertIn("agentManager.getPaseoToolPolicy(callerAgentId)", bootstrap)
+        self.assertIn(
+            "if (!isPaseoToolEnabled(options.paseoToolPolicy, name))",
+            paseo_tools,
+        )
+
     def test_runtime_state_templates_are_empty(self) -> None:
         leases = json.loads((ROOT / "templates/lead-leases.empty.json").read_text())
-        self.assertEqual(leases, {"version": 1, "leases": {}})
+        self.assertEqual(leases, {"version": 2, "leases": {}})
 
     def test_expected_executables_are_marked_executable(self) -> None:
         paths = [

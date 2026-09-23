@@ -48,6 +48,8 @@ EXPECTED_PAYLOADS = {
     "bin/opencode-paseo-room",
     "bin/paseo-room-deny",
     "bin/paseo-room-mcp",
+    "bin/paseo-room-workflow",
+    "bin/room_workflow.py",
     "config/claude/lead.instructions.md.tmpl",
     "config/claude/lead.mcp.json.tmpl",
     "config/claude/lead.settings.json.tmpl",
@@ -76,12 +78,16 @@ EXPECTED_PAYLOADS = {
     "scripts/export_public_kit.py",
     "scripts/install-antigravity-acp.sh",
     "scripts/install.sh",
+    "scripts/manage_zshrc.py",
     "scripts/render_template.py",
     "templates/SUPERVISOR_NOTEBOOK.md",
     "templates/codex-config.minimal.toml",
     "templates/lead-leases.empty.json",
     "tests/test_portability.py",
     "tests/test_proxy_handback.py",
+    "tests/test_workflow.py",
+    "tests/test_doctor.py",
+    "tests/test_install.py",
     "tests/test_public_export.py",
 }
 
@@ -100,6 +106,23 @@ EXCLUDED_SOURCE_PATHS = {
 
 
 class PublicExportTest(unittest.TestCase):
+    def test_paseo_pin_matches_private_and_public_locks(self) -> None:
+        root_lock = json.loads(
+            (ROOT / "versions.lock.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(root_lock["paseo"], "0.8.0")
+
+        public_lock_path = ROOT / "public-export/versions.lock.json"
+        if not public_lock_path.is_file():
+            self.assertNotIn("captured_at", root_lock)
+            return
+
+        public_lock = json.loads(public_lock_path.read_text(encoding="utf-8"))
+        self.assertEqual(public_lock["paseo"], root_lock["paseo"])
+        self.assertNotIn("captured_at", public_lock)
+        for key, value in public_lock.items():
+            self.assertEqual(root_lock[key], value, key)
+
     def test_allowlist_matches_exact_review_baseline(self) -> None:
         allowlist_path = ROOT / "public-export/allowlist.json"
         if not allowlist_path.is_file():
@@ -201,6 +224,7 @@ class PublicExportTest(unittest.TestCase):
             def run(*command: str) -> subprocess.CompletedProcess[str]:
                 environment = os.environ.copy()
                 environment["PYTHONDONTWRITEBYTECODE"] = "1"
+                environment["PASEO_APP_PATH"] = str(parent / "no-paseo-app")
                 return subprocess.run(
                     command,
                     cwd=artifact,

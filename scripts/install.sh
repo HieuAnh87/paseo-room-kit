@@ -33,6 +33,56 @@ backup_existing() {
   cp -p "$destination" "$backup"
 }
 
+zshenv_status=""
+zprofile_status=""
+zshrc_status=""
+
+check_zsh_startup_fragment() {
+  local target="$1"
+  local destination="${target_home}/.${target}"
+  local manager="${repo_root}/scripts/manage_zshrc.py"
+  local status
+
+  status="$(python3 "$manager" "$destination" --target "$target" --check)"
+  case "$status" in
+    unchanged|changed) ;;
+    *)
+      printf 'unexpected zsh PATH guard status: %s\n' "$status" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$target" == "zshenv" ]]; then
+    zshenv_status="$status"
+  elif [[ "$target" == "zprofile" ]]; then
+    zprofile_status="$status"
+  else
+    zshrc_status="$status"
+  fi
+}
+
+check_zsh_startup_fragments() {
+  # Validate all startup files before any installer mutation, so malformed markers
+  # fail closed without a partial install or backup.
+  check_zsh_startup_fragment zshenv
+  check_zsh_startup_fragment zprofile
+  check_zsh_startup_fragment zshrc
+}
+
+check_paseo_config_render() {
+  local destination="${target_home}/.paseo/config.json"
+  local rendered
+  rendered="$(mktemp)"
+  if ! python3 "${repo_root}/scripts/render_template.py" \
+      "${repo_root}/config/paseo/config.json.tmpl" \
+      "$rendered" --home "$target_home" \
+      --preserve-json-from "$destination" \
+      --preserve-existing-json-key pluginsEnabled; then
+    unlink "$rendered"
+    return 1
+  fi
+  unlink "$rendered"
+}
+
 install_file() {
   local source="$1"
   local destination="$2"
@@ -50,9 +100,14 @@ install_file() {
   [[ "$mode" == "apply" ]] || return 0
   mkdir -p "$(dirname "$destination")"
   backup_existing "$destination"
-  if [[ "$kind" == "render" ]]; then
-    python3 "${repo_root}/scripts/render_template.py" \
+  if [[ "$kind" == "render" || "$kind" == "render-paseo-config" ]]; then
+    local render_args=(
       "$source" "$destination" --home "$target_home"
+    )
+    if [[ "$kind" == "render-paseo-config" ]]; then
+      render_args+=(--preserve-existing-json-key pluginsEnabled)
+    fi
+    python3 "${repo_root}/scripts/render_template.py" "${render_args[@]}"
   else
     cp -p "$source" "$destination"
   fi
@@ -74,8 +129,43 @@ install_if_missing() {
   chmod "$file_mode" "$destination"
 }
 
+apply_zsh_startup_fragment() {
+  local target="$1"
+  local status
+  local destination="${target_home}/.${target}"
+  local manager="${repo_root}/scripts/manage_zshrc.py"
+
+  if [[ "$target" == "zshenv" ]]; then
+    status="$zshenv_status"
+  elif [[ "$target" == "zprofile" ]]; then
+    status="$zprofile_status"
+  else
+    status="$zshrc_status"
+  fi
+  if [[ "$status" == "unchanged" ]]; then
+    printf 'KEEP managed zsh PATH guard %s\n' "$destination"
+    return 0
+  fi
+
+  printf '%s %s\n' "$mode" "$destination"
+  [[ "$mode" == "apply" ]] || return 0
+  mkdir -p "$(dirname "$destination")"
+  backup_existing "$destination"
+  python3 "$manager" "$destination" --target "$target" --apply >/dev/null
+}
+
+apply_zsh_startup_fragments() {
+  apply_zsh_startup_fragment zshenv
+  apply_zsh_startup_fragment zprofile
+  apply_zsh_startup_fragment zshrc
+}
+
+check_zsh_startup_fragments
+check_paseo_config_render
+
 install_file "${repo_root}/config/paseo/config.json.tmpl" \
-  "${target_home}/.paseo/config.json" 600 render
+  "${target_home}/.paseo/config.json" 600 render-paseo-config
+printf 'PRESERVE host-only Paseo config key pluginsEnabled when present\n'
 install_file "${repo_root}/config/paseo/orchestration-preferences.json" \
   "${target_home}/.paseo/orchestration-preferences.json" 644
 
@@ -99,12 +189,16 @@ install_file "${repo_root}/hooks/room-role-guard.py" \
 install_file "${repo_root}/hooks/test-room-role-guard.py" \
   "${target_home}/.codex/hooks/test-room-role-guard.py" 644
 
-for executable in claude-room codex-room codex-room-sync paseo-room-mcp opencode-paseo-room opencode-paseo-peer; do
+for executable in claude-room codex-room codex-room-sync paseo-room-mcp paseo-room-workflow opencode-paseo-room opencode-paseo-peer; do
   install_file "${repo_root}/bin/${executable}" \
     "${target_home}/.local/bin/${executable}" 755
 done
+install_file "${repo_root}/bin/room_workflow.py" \
+  "${target_home}/.local/bin/room_workflow.py" 644
 install_file "${repo_root}/bin/paseo-room-deny" \
   "${target_home}/.local/share/paseo-room-bin/paseo" 755
+
+apply_zsh_startup_fragments
 
 install_file "${repo_root}/config/opencode/paseo-peer.json" \
   "${target_home}/.config/opencode/paseo-peer.json" 600

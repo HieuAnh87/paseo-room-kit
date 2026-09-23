@@ -8,7 +8,7 @@ Human không cần biết Lead ID. Luồng vận hành:
 2. Nói objective/constraint/accepted decision với Supervisor.
 3. Supervisor kiểm tra workspace ownership.
 4. Nếu chưa có Lead khỏe, Codex/Claude Supervisor tạo stable `codex-lead/gpt-5.6-sol` theo `planning`; chỉ dùng Sonnet theo `planning_pilot` khi Human yêu cầu rõ. DeepSeek budget Supervisor chỉ tạo GLM theo `planning_budget`.
-5. Creation có labels `role=lead`, `route=planning`, `lead_profile=stable|pilot|budget`, `stack_profile=standard|budget`, `task_state=LEASED`; MCP proxy reserve lease trước khi forward.
+5. Creation có labels `role=lead`, `route=planning`, `lead_profile=stable|pilot|budget`, `stack_profile=standard|budget`, `room_kind=managed_slp`, `work_epoch=1`, `task_state=LEASED`, và `notifyOnFinish=false`; MCP proxy reserve lease trước khi forward.
 6. Supervisor inspect provider/model và active lease ngay sau creation.
 7. Lead nhận brief và tự quyết định có cần Peer hay không.
 8. Sau callback/validation, Lead gọi `handback_to_parent` đúng một lần.
@@ -64,13 +64,18 @@ Lead phải:
 1. đọc `~/.paseo/orchestration-preferences.json`;
 2. chọn category theo task;
 3. tạo bounded brief;
-4. truyền labels `role=peer`, `route=<category>`, `task_state=ASSIGNED`;
+4. truyền labels `role=peer`, `route=<category>`, `room_kind=managed_slp`, `work_epoch=<current>`, `task_state=ASSIGNED`;
 5. để `notifyOnFinish` bật; không poll;
 6. truyền `thinkingOptionId` nếu route yêu cầu;
 7. inspect agent ngay lập tức;
 8. khi callback về, cập nhật `task_state` theo outcome rồi chỉ đặt `ACCEPTED` sau validation;
 9. dừng nếu provider/model sai;
 10. khi toàn bộ bounded work đã accepted, gọi `handback_to_parent` đúng một lần với outcome, evidence, remaining risk và decision cần Human.
+
+Nếu callback dự kiến không render, gọi `recover_peer_callbacks` đúng một lần.
+Kết quả được fence theo parent/workspace/current epoch và lưu digest receipt;
+lần gọi lại đọc receipt, không đọc activity lặp lại. Đây là recovery, không phải
+health polling.
 
 Không hardcode stock `codex/gpt-5.4` hoặc `codex/...` trong workflow mới.
 
@@ -100,6 +105,12 @@ Không archive/kill Lead trước khi có checkpoint. Checklist:
 
 Replacement order: checkpoint → handoff → archive Lead cũ → xác nhận lease `released` → tạo Lead mới → verify provider → reconcile workspace. Guard sẽ deny nếu Lead/lease cũ còn active.
 
+Với custom Lead cũ thiếu role label hoặc workspace đã archive nhưng agent record
+vẫn active, Supervisor chạy `inspect_slp_ownership`. Chỉ sau explicit
+Human-authorized checkpoint/replacement mới dùng `retire_legacy_lead` với exact
+workspace + authority digest. Tool không cho retire managed lease holder và
+không dùng `idle` làm authority.
+
 ## Archive/delete
 
 - `archive` là lifecycle soft-close, giữ history.
@@ -107,6 +118,8 @@ Replacement order: checkpoint → handoff → archive Lead cũ → xác nhận l
 - Archive chỉ sau handback hoặc abandonment đã xác nhận.
 - Không archive một agent chỉ vì nó idle.
 - Không dùng archive để che misrouting; giữ legacy record cho audit.
+- Managed workspace chỉ archive sau digest-bound Human decision bằng
+  `archive_slp_workspace`; generic archive bị deny.
 
 ## Config change
 
@@ -125,11 +138,15 @@ Nếu một tool biến mất:
 
 1. xác định agent provider;
 2. xem tool thuộc Codex baseline hay Paseo control injection;
-3. kiểm tra `injectIntoAgents=false`; nếu vừa đổi config thì xác nhận daemon đã restart có chủ đích;
-4. không tìm `injectIntoProviders`: Paseo `0.2.5` không implement field này;
+3. kiểm tra `injectIntoAgents=false` và mọi custom internal provider có
+   `paseoTools.enabled=false`;
+4. Paseo 0.8 dùng per-provider `paseoTools`; không dùng field lịch sử
+   `injectIntoProviders`;
 5. kiểm tra Supervisor/Lead runtime có `[mcp_servers.paseo]` trỏ `paseo-room-mcp`, Peer runtime không có;
 6. chạy stdio proxy smoke test và xác nhận wrong route/duplicate Lead bị deny trước upstream;
-7. với Lead, xác nhận catalog có `handback_to_parent`; với Supervisor, xác nhận tool này không xuất hiện;
+7. với Lead, xác nhận catalog có `handback_to_parent` và
+   `recover_peer_callbacks`; với Supervisor, xác nhận queue/protected lifecycle
+   và ownership tools nhưng không có Lead-only handback;
 8. kiểm tra OpenCode permission hoặc ACP `supportsMcpServers`;
 9. kiểm tra executable/env/credential source của MCP;
 10. không copy secret vào prompt để “test nhanh”.

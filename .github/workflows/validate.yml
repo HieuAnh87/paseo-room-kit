@@ -16,3 +16,7 @@ jobs:
         run: ./scripts/doctor.sh --repo
       - name: Validate public export contract
         run: python3 tests/test_public_export.py
+      - name: Validate doctor environment checks
+        run: python3 tests/test_doctor.py
+      - name: Validate installer behavior
+        run: python3 tests/test_install.py

@@ -35,7 +35,7 @@ Một Codex baseline được materialize thành ba `CODEX_HOME` khác nhau. Nat
 
 ## D7 — MCP
 
-Paseo `0.2.5` chỉ có global `injectIntoAgents`; `injectIntoProviders` không có implementation. Global injection được tắt. Supervisor/Lead nhận role-aware `paseo-room-mcp`; Peer không nhận control MCP. OpenCode permissions, CLI wrapper và ACP capability flag bổ sung boundary. Baseline Codex MCP vẫn được runtime role kế thừa.
+Tại thời điểm D7, Paseo `0.2.5` chỉ có global `injectIntoAgents`; `injectIntoProviders` không có implementation. Global injection được tắt. Supervisor/Lead nhận role-aware `paseo-room-mcp`; Peer không nhận control MCP. OpenCode permissions, CLI wrapper và ACP capability flag bổ sung boundary. Baseline Codex MCP vẫn được runtime role kế thừa.
 
 ## D8 — Rút gọn OpenCode Peer
 
@@ -114,3 +114,42 @@ non-UI Peer. UI giữ `gemini-ui` qua agy. Guard bind bằng
 `lead_profile=budget` + `stack_profile=budget`: chỉ budget Supervisor tạo được
 budget Lead, và Lead đó luôn resolve `*_budget`. Stable Sol và Sonnet pilot
 không đổi.
+
+## D19 — Managed SLP dùng epoch, revision và evidence digest
+
+Native status và callback chỉ là transport/runtime fact. Managed room được đánh
+dấu `room_kind=managed_slp`; `lead-leases.json` version 2 là authority cho
+`work_epoch`, monotonic `revision`, trạng thái giao handback và Human decision.
+
+- handback, reopen và archive đều reserve trước khi gọi transport;
+- response mơ hồ không tự retry và phải được Human resolve;
+- acceptance/abandonment bind vào SHA-256 digest của evidence đúng epoch;
+- generic prompt/archive và direct lifecycle-label mutation bị deny;
+- history JSONL là audit evidence, không replay để override lease registry.
+
+## D20 — Recovery phải dựa vào persisted authority, không dựa vào plugin event hoặc idle
+
+Một Peer đã có terminal handback trong Paseo activity nhưng callback không render
+trong Lead turn. Chọn `recover_peer_callbacks` làm bounded exception path:
+kiểm tra parent/workspace/current epoch, đọc durable status/activity một lần, lưu
+message + digest receipt trong lease, và những lần gọi lại dùng receipt thay vì
+đọc activity tiếp. Paseo 0.8 curated activity không expose stable turn ID, nên
+receipt bind `peerId + workEpoch + updateCount + terminal message`; missing hoặc
+invalid update count fail closed. Native callback vẫn là primary path; recovery
+không phải poll.
+
+Episode legacy Lead cho thấy workspace archive và agent `archivedAt` là hai fact
+khác nhau. Chọn `inspect_slp_ownership` để phân loại theo workspace registry,
+Paseo-owned parentage và lease; unparented/foreign records được hiển thị nhưng
+không tạo mutation authority. `retire_legacy_lead` chỉ soft-archive exact
+parent-owned custom Lead không giữ managed lease, với authority digest và explicit
+Human-authorized checkpoint/replacement. Native `idle` không cấp authority.
+
+Paseo 0.8 hỗ trợ per-provider `paseoTools.enabled`. Mọi custom internal SLP
+provider đặt `enabled=false`, nên global injection nếu bật về sau vẫn không cấp
+native unrestricted catalog. Vì cùng policy làm caller-scoped HTTP catalog rỗng,
+proxy thử top-level daemon catalog sau empty/method-not-found response rồi khôi phục chỉ
+workspace/parent defaults từ caller record trước role filter + guard; regression
+test giữ đây là control surface duy nhất.
+Plugin không được đưa vào lifecycle truth; UI tương lai chỉ có thể là thin client
+trên protected operations.

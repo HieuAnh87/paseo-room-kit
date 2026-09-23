@@ -44,6 +44,15 @@ class RoomRoleGuardTest(unittest.TestCase):
             )
         )
         self.leases = self.root / "lead-leases.json"
+        self.workspaces = self.root / "workspaces.json"
+        self.workspaces.write_text(
+            json.dumps(
+                [
+                    {"workspaceId": "workspace-control", "archivedAt": None},
+                    {"workspaceId": "workspace-project", "archivedAt": None},
+                ]
+            )
+        )
         self.supervisor_id = "supervisor-1"
         self.lead_id = "lead-1"
         self.write_agent(
@@ -62,9 +71,31 @@ class RoomRoleGuardTest(unittest.TestCase):
                 "labels": {
                     "role": "lead",
                     "stack_profile": "standard",
+                    "room_kind": "managed_slp",
+                    "work_epoch": "1",
                     "paseo.parent-agent-id": self.supervisor_id,
                 },
             }
+        )
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                            "supervisor_agent_id": self.supervisor_id,
+                            "work_epoch": 1,
+                            "handback_epoch": 0,
+                            "revision": 1,
+                            "decision_state": "WORKING",
+                        }
+                    },
+                }
+            )
         )
 
     def tearDown(self) -> None:
@@ -81,6 +112,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             "ROOM_GUARD_AGENTS_DIR": str(self.agents),
             "ROOM_GUARD_PREFERENCES": str(self.preferences),
             "ROOM_GUARD_LEASES_PATH": str(self.leases),
+            "ROOM_GUARD_WORKSPACES_PATH": str(self.workspaces),
             "ROOM_GUARD_AUDIT_PATH": str(self.root / "guard-audit.jsonl"),
         }
         result = subprocess.run(
@@ -141,9 +173,12 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(output["updatedInput"]["labels"]["route"], "planning")
         self.assertEqual(output["updatedInput"]["labels"]["lead_profile"], "stable")
         self.assertEqual(output["updatedInput"]["labels"]["stack_profile"], "standard")
-        self.assertTrue(output["updatedInput"]["notifyOnFinish"])
+        self.assertFalse(output["updatedInput"]["notifyOnFinish"])
+        self.assertEqual(output["updatedInput"]["labels"]["room_kind"], "managed_slp")
+        self.assertEqual(output["updatedInput"]["labels"]["work_epoch"], "1")
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["state"], "pending")
+        self.assertEqual(lease["work_epoch"], 1)
 
     def test_supervisor_rewrites_claude_pilot_lead(self) -> None:
         result = self.run_guard(
@@ -215,7 +250,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["stack_profile"], "budget")
         self.assertEqual(updated["settings"]["modeId"], "build")
         self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
-        self.assertTrue(updated["notifyOnFinish"])
+        self.assertFalse(updated["notifyOnFinish"])
 
     def test_budget_supervisor_cannot_create_stable_lead(self) -> None:
         self.write_agent(
@@ -276,6 +311,8 @@ class RoomRoleGuardTest(unittest.TestCase):
         updated = result["hookSpecificOutput"]["updatedInput"]
         self.assertEqual(updated["labels"]["role"], "peer")
         self.assertEqual(updated["labels"]["task_state"], "ASSIGNED")
+        self.assertEqual(updated["labels"]["room_kind"], "managed_slp")
+        self.assertEqual(updated["labels"]["work_epoch"], "1")
         self.assertEqual(updated["settings"]["thinkingOptionId"], "low")
 
     def test_lead_rejects_wrong_route_provider(self) -> None:
@@ -303,9 +340,31 @@ class RoomRoleGuardTest(unittest.TestCase):
                 "labels": {
                     "role": "lead",
                     "stack_profile": "budget",
+                    "room_kind": "managed_slp",
+                    "work_epoch": "1",
                     "paseo.parent-agent-id": self.supervisor_id,
                 },
             }
+        )
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-budget": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-budget",
+                            "lead_agent_id": self.lead_id,
+                            "supervisor_agent_id": self.supervisor_id,
+                            "work_epoch": 1,
+                            "handback_epoch": 0,
+                            "revision": 1,
+                            "decision_state": "WORKING",
+                        }
+                    },
+                }
+            )
         )
         result = self.run_guard(
             "lead",
@@ -331,8 +390,34 @@ class RoomRoleGuardTest(unittest.TestCase):
                 "id": self.lead_id,
                 "workspaceId": "workspace-budget",
                 "provider": "opencode-lead",
-                "labels": {"role": "lead", "stack_profile": "budget"},
+                "labels": {
+                    "role": "lead",
+                    "stack_profile": "budget",
+                    "paseo.parent-agent-id": self.supervisor_id,
+                    "room_kind": "managed_slp",
+                    "work_epoch": "1",
+                },
             }
+        )
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-budget": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-budget",
+                            "lead_agent_id": self.lead_id,
+                            "supervisor_agent_id": self.supervisor_id,
+                            "work_epoch": 1,
+                            "handback_epoch": 0,
+                            "revision": 1,
+                            "decision_state": "WORKING",
+                        }
+                    },
+                }
+            )
         )
         result = self.run_guard(
             "lead",
@@ -432,6 +517,106 @@ class RoomRoleGuardTest(unittest.TestCase):
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_managed_workspace_archive_requires_protected_operation(self) -> None:
+        digest = "sha256:" + "a" * 64
+        lease = {
+            "state": "active",
+            "room_kind": "managed_slp",
+            "workspace_id": "workspace-project",
+            "lead_agent_id": self.lead_id,
+            "supervisor_agent_id": self.supervisor_id,
+            "work_epoch": 1,
+            "handback_epoch": 1,
+            "decision_state": "HANDBACK_READY",
+            "revision": 3,
+            "evidence_digest": digest,
+        }
+        self.leases.write_text(json.dumps({"version": 2, "leases": {"workspace-project": lease}}))
+        denied = self.run_guard(
+            "supervisor",
+            self.pre("mcp__paseo__archive_workspace", {"workspaceId": "workspace-project"}),
+            self.supervisor_id,
+        )
+        lease.update(
+            {
+                "human_decision": "ACCEPTED",
+                "human_decision_epoch": 1,
+                "human_decision_evidence_digest": digest,
+            }
+        )
+        self.leases.write_text(json.dumps({"version": 2, "leases": {"workspace-project": lease}}))
+        still_denied = self.run_guard(
+            "supervisor",
+            self.pre("mcp__paseo__archive_workspace", {"workspaceId": "workspace-project"}),
+            self.supervisor_id,
+        )
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(still_denied["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn(
+            "archive_slp_workspace",
+            still_denied["hookSpecificOutput"]["permissionDecisionReason"],
+        )
+
+    def test_changed_evidence_invalidates_workspace_archive_acceptance(self) -> None:
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                            "work_epoch": 1,
+                            "handback_epoch": 1,
+                            "decision_state": "HANDBACK_READY",
+                            "evidence_digest": "sha256:" + "b" * 64,
+                            "human_decision": "ACCEPTED",
+                            "human_decision_epoch": 1,
+                            "human_decision_evidence_digest": "sha256:" + "a" * 64,
+                        }
+                    },
+                }
+            )
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre("mcp__paseo__archive_workspace", {"workspaceId": "workspace-project"}),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_malformed_lease_registry_fails_closed_for_archive(self) -> None:
+        invalid_values = (
+            "not-json",
+            json.dumps({"version": 2, "leases": {"workspace-project": []}}),
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "workspace_id": "workspace-project",
+                            "revision": 0,
+                        }
+                    },
+                }
+            ),
+        )
+        for invalid in invalid_values:
+            self.leases.write_text(invalid)
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_guard(
+                    "supervisor",
+                    self.pre(
+                        "mcp__paseo__archive_workspace",
+                        {"workspaceId": "workspace-project"},
+                    ),
+                    self.supervisor_id,
+                )
+            self.assertEqual(self.leases.read_text(), invalid)
+
     def test_post_archive_workspace_releases_and_reconciles_leases(self) -> None:
         self.write_agent(
             {
@@ -480,6 +665,164 @@ class RoomRoleGuardTest(unittest.TestCase):
             leases["workspace-old"]["release_reason"],
             "archived_agent_reconciled",
         )
+
+    def test_new_reservation_reconciles_active_lease_with_missing_lead_record(self) -> None:
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "leases": {
+                        "workspace-stale": {
+                            "state": "active",
+                            "workspace_id": "workspace-stale",
+                            "lead_agent_id": "lead-no-longer-present",
+                        }
+                    },
+                }
+            )
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-new",
+                    "title": "Replacement",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "allow")
+        registry = json.loads(self.leases.read_text())
+        self.assertEqual(registry["version"], 2)
+        stale = registry["leases"]["workspace-stale"]
+        self.assertEqual(stale["state"], "released")
+        self.assertEqual(stale["release_reason"], "missing_agent_reconciled")
+
+    def test_unreadable_lead_record_keeps_active_lease_fail_closed(self) -> None:
+        (self.agents / f"{self.lead_id}.json").write_text("{not-json")
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                        }
+                    },
+                }
+            )
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-project",
+                    "title": "Must not duplicate",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-project"]
+        self.assertEqual(lease["state"], "active")
+
+    def test_orphan_live_lead_recovery_writes_canonical_v2_lease(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-project",
+                    "title": "Must detect live owner",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        registry = json.loads(self.leases.read_text())
+        lease = registry["leases"]["workspace-project"]
+        self.assertEqual(registry["version"], 2)
+        self.assertEqual(lease["room_kind"], "managed_slp")
+        self.assertEqual(lease["work_epoch"], 1)
+        self.assertEqual(lease["handback_epoch"], 0)
+        self.assertEqual(lease["decision_state"], "WORKING")
+
+    def test_unlabeled_custom_lead_blocks_replacement_and_is_reconciled(self) -> None:
+        legacy = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        legacy["labels"] = {"paseo.parent-agent-id": self.supervisor_id}
+        self.write_agent(legacy)
+        self.leases.write_text(json.dumps({"version": 2, "leases": {}}))
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-project",
+                    "title": "Replacement must wait",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-project"]
+        self.assertEqual(lease["state"], "active")
+        self.assertEqual(lease["lead_agent_id"], self.lead_id)
+        self.assertEqual(lease["room_kind"], "managed_slp")
+        self.assertTrue(lease["legacy_orphan"])
+        self.assertEqual(lease["decision_state"], "LEGACY_BLOCKED")
+
+    def test_new_reservation_reconciles_archived_workspace_with_live_lead_record(self) -> None:
+        self.workspaces.write_text(
+            json.dumps(
+                [
+                    {"workspaceId": "workspace-control", "archivedAt": None},
+                    {"workspaceId": "workspace-project", "archivedAt": "2026-08-25T00:00:00Z"},
+                ]
+            )
+        )
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                        }
+                    },
+                }
+            )
+        )
+        self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "codex-lead/gpt-5.6-sol",
+                    "workspaceId": "workspace-new",
+                    "title": "New room",
+                    "initialPrompt": "Own the objective.",
+                },
+            ),
+            self.supervisor_id,
+        )
+        stale = json.loads(self.leases.read_text())["leases"]["workspace-project"]
+        self.assertEqual(stale["state"], "released")
+        self.assertEqual(stale["release_reason"], "archived_workspace_reconciled")
 
     def test_failed_archive_workspace_does_not_release_lease(self) -> None:
         self.leases.write_text(
@@ -546,6 +889,141 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertIsNone(allowed)
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
 
+    def test_supervisor_must_use_reopen_operation_for_handback_ready_lead(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"]["task_state"] = "HANDBACK_READY"
+        lead["labels"]["room_kind"] = "managed_slp"
+        lead["labels"]["work_epoch"] = "1"
+        self.write_agent(lead)
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__send_agent_prompt",
+                {"agentId": self.lead_id, "prompt": "Follow up"},
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("protected SLP operation", result["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_nested_update_cannot_change_proxy_owned_lead_lifecycle(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"].update(
+            {"task_state": "HANDBACK_READY", "room_kind": "managed_slp", "work_epoch": "1"}
+        )
+        self.write_agent(lead)
+        source = f'''const r=await tools.mcp__paseo__update_agent({{
+  agentId:"{self.lead_id}",
+  labels:{{task_state:"LEASED",room_kind:"managed_slp",work_epoch:"2"}}
+}});text(r)'''
+        result = self.run_guard(
+            "supervisor",
+            self.pre("exec", {"input": source}),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("proxy-owned", result["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_direct_update_cannot_drop_proxy_owned_lead_lifecycle(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"].update(
+            {"task_state": "HANDBACK_READY", "room_kind": "managed_slp", "work_epoch": "1"}
+        )
+        self.write_agent(lead)
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__update_agent",
+                {"agentId": self.lead_id, "labels": {"note": "would replace labels"}},
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_lead_self_update_cannot_change_lifecycle_direct_or_nested(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"].update(
+            {"task_state": "LEASED", "room_kind": "managed_slp", "work_epoch": "2"}
+        )
+        self.write_agent(lead)
+        direct = self.run_guard(
+            "lead",
+            self.pre(
+                "mcp__paseo__update_agent",
+                {
+                    "agentId": self.lead_id,
+                    "labels": {
+                        "task_state": "HANDBACK_READY",
+                        "room_kind": "managed_slp",
+                        "work_epoch": "2",
+                    },
+                },
+            ),
+            self.lead_id,
+        )
+        source = f'''const r=await tools.mcp__paseo__update_agent({{
+  agentId:"{self.lead_id}",
+  labels:{{task_state:"LEASED",room_kind:"ad_hoc",work_epoch:"3"}}
+}});text(r)'''
+        nested = self.run_guard(
+            "lead",
+            self.pre("exec", {"input": source}),
+            self.lead_id,
+        )
+        self.assertEqual(direct["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertEqual(nested["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_generic_prompt_is_denied_while_managed_delivery_is_in_flight(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"].update(
+            {"task_state": "LEASED", "room_kind": "managed_slp", "work_epoch": "2"}
+        )
+        self.write_agent(lead)
+        self.leases.write_text(
+            json.dumps(
+                {
+                    "version": 2,
+                    "leases": {
+                        "workspace-project": {
+                            "state": "active",
+                            "room_kind": "managed_slp",
+                            "workspace_id": "workspace-project",
+                            "lead_agent_id": self.lead_id,
+                            "work_epoch": 2,
+                            "handback_epoch": 1,
+                            "decision_state": "REOPEN_SENDING",
+                        }
+                    },
+                }
+            )
+        )
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__send_agent_prompt",
+                {"agentId": self.lead_id, "prompt": "racing prompt"},
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("REOPEN_SENDING", result["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_generic_prompt_is_denied_for_working_managed_lead(self) -> None:
+        lead = json.loads((self.agents / f"{self.lead_id}.json").read_text())
+        lead["labels"].update(
+            {"task_state": "LEASED", "room_kind": "managed_slp", "work_epoch": "1"}
+        )
+        self.write_agent(lead)
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__send_agent_prompt",
+                {"agentId": self.lead_id, "prompt": "generic managed prompt"},
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_supervisor_can_rearchive_persisted_archived_agent_for_recovery(self) -> None:
         self.write_agent(
             {
@@ -599,8 +1077,8 @@ const r=await tools.mcp__paseo__create_agent({
 const r=await tools.mcp__paseo__create_agent({
   workspaceId:"workspace-new",
   provider:"codex-lead/gpt-5.6-sol",
-  notifyOnFinish:true,
-  labels:{role:"lead",route:"planning",task_state:"LEASED"},
+  notifyOnFinish:false,
+  labels:{role:"lead",route:"planning",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
   settings:{modeId:"full-access"},
   initialPrompt:`Own the objective.`
 });text(r)
@@ -619,8 +1097,8 @@ const r=await tools.mcp__paseo__create_agent({
 const r=await tools.mcp__paseo__create_agent({
   workspaceId:"workspace-pilot",
   provider:"claude-lead/claude-sonnet-5[1m]",
-  notifyOnFinish:true,
-  labels:{role:"lead",route:"planning",lead_profile:"pilot",task_state:"LEASED"},
+  notifyOnFinish:false,
+  labels:{role:"lead",route:"planning",lead_profile:"pilot",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
   settings:{modeId:"bypassPermissions",thinkingOptionId:"high"},
   initialPrompt:`Own the objective.`
 });text(r)
@@ -639,7 +1117,7 @@ const r=await tools.mcp__paseo__create_agent({
 const r=await tools.mcp__paseo__create_agent({
   provider:"codex-peer/gpt-5.6-luna",
   notifyOnFinish:true,
-  labels:{role:"peer",route:"search",task_state:"ASSIGNED"},
+  labels:{role:"peer",route:"search",task_state:"ASSIGNED",room_kind:"managed_slp",work_epoch:"1"},
   settings:{thinkingOptionId:"low"},
   initialPrompt:`Search only.`
 });text(r)
@@ -667,8 +1145,8 @@ const r=await tools.mcp__paseo__create_agent({
 const r=await tools.mcp__paseo__create_agent({
   workspaceId:"workspace-new",
   provider:"codex-lead/gpt-5.6-sol",
-  notifyOnFinish:true,
-  labels:{role:"lead",route:"planning",task_state:"LEASED"},
+  notifyOnFinish:false,
+  labels:{role:"lead",route:"planning",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
   settings:{modeId:"full-access"},
   initialPrompt:`Own the objective.`
 });text(r)
