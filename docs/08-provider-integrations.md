@@ -45,15 +45,15 @@ claude-supervisor
 
 claude-lead
   → ~/.local/bin/claude-room lead
-  → Claude Sonnet 5 1M · High
+  → Claude Opus 5.5 1M · High
   → 300K auto-compact window + Lead instructions/settings/Paseo MCP
 ```
 
 `claude-supervisor` là Human-facing front door song song. `claude-lead` là
-engineering-owner pilot riêng và chỉ được route khi Human yêu cầu rõ; stable
-`planning` vẫn là `codex-lead/gpt-5.6-sol`. Wrapper dùng strict MCP config,
+engineering owner được Supervisor tự chọn cho objective phù hợp; Human có thể
+chỉ định route. `planning` vẫn là `codex-lead/gpt-6-sol`. Wrapper dùng strict MCP config,
 chặn native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
-mọi delegation qua Paseo. Lead pilot dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+mọi delegation qua Paseo. Claude Lead dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
 chính thức của Claude Code để giới hạn active window ở 300K dù model có ceiling
 1M.
 
@@ -94,7 +94,7 @@ Local installation:
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
 | governance Supervisor thử nghiệm | `claude-supervisor/claude-opus-4-8` |
-| engineering Lead pilot dài hạn | `claude-lead/claude-sonnet-5[1m]` |
+| engineering Lead dài hạn | `claude-lead/claude-opus-5-5` |
 | full budget Supervisor | `opencode-supervisor/aibox/deepseek-v4-flash` |
 | full budget Lead | `opencode-lead/aibox/glm-5.2` |
 | direct interactive Claude | built-in `claude`, không tự đưa vào Peer route |

@@ -7,8 +7,8 @@ Human không cần biết Lead ID. Luồng vận hành:
 1. Mở hoặc tạo workspace ở project root.
 2. Nói objective/constraint/accepted decision với Supervisor.
 3. Supervisor kiểm tra workspace ownership.
-4. Nếu chưa có Lead khỏe, Codex/Claude Supervisor tạo stable `codex-lead/gpt-5.6-sol` theo `planning`; chỉ dùng Sonnet theo `planning_pilot` khi Human yêu cầu rõ. DeepSeek budget Supervisor chỉ tạo GLM theo `planning_budget`.
-5. Creation có labels `role=lead`, `route=planning`, `lead_profile=stable|pilot|budget`, `stack_profile=standard|budget`, `room_kind=managed_slp`, `work_epoch=1`, `task_state=LEASED`, và `notifyOnFinish=false`; MCP proxy reserve lease trước khi forward.
+4. Nếu chưa có Lead khỏe, Codex/Claude Supervisor tự chọn `codex-lead/gpt-6-sol` theo `planning` hoặc `claude-lead/claude-opus-5-5` theo `planning_claude`. Ưu tiên Human nếu được chỉ định; khi không có lợi thế rõ, dùng Codex. DeepSeek budget Supervisor chỉ tạo GLM theo `planning_budget`.
+5. Creation có labels `role=lead`, `route=planning`, `lead_profile=stable|claude|budget`, `stack_profile=standard|budget`, `room_kind=managed_slp`, `work_epoch=1`, `task_state=LEASED`, và `notifyOnFinish=false`; MCP proxy reserve lease trước khi forward. Một Lead sở hữu một objective/workstream trong workspace đó, không nhận objective độc lập khác.
 6. Supervisor inspect provider/model và active lease ngay sau creation.
 7. Lead nhận brief và tự quyết định có cần Peer hay không.
 8. Sau callback/validation, Lead gọi `handback_to_parent` đúng một lần.

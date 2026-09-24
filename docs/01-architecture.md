@@ -26,7 +26,7 @@ Paseo daemon
   ├── claude-supervisor → claude-room supervisor → Claude Opus runtime
   ├── codex-supervisor → codex-room supervisor → Codex runtime
   ├── codex-lead       → codex-room lead       → Codex runtime
-  ├── claude-lead      → claude-room lead      → Claude Sonnet runtime
+  ├── claude-lead      → claude-room lead      → Claude Opus runtime
   ├── codex-peer       → codex-room peer       → Codex runtime
   ├── opencode-peer    → opencode-paseo-peer   → OpenCode ACP
   └── gemini-ui        → antigravity-acp       → agy/Antigravity CLI

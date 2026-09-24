@@ -574,7 +574,7 @@ def resolve_lead_route(
     profile = labels.get(LEAD_PROFILE_LABEL, "stable")
     provider_key = {
         "stable": "planning",
-        "pilot": "planning_pilot",
+        "claude": "planning_claude",
         "budget": "planning_budget",
     }.get(profile)
     if provider_key is None:

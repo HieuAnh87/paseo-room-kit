@@ -6,8 +6,8 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 
 | Category | Provider/model | Thinking | Dùng cho |
 |---|---|---|---|
-| `planning` | `codex-lead/gpt-5.6-sol` | Medium mặc định | Supervisor bootstrap Lead |
-| `planning_pilot` | `claude-lead/claude-sonnet-5[1m]` | High | chỉ khi Human yêu cầu Sonnet Lead pilot |
+| `planning` | `codex-lead/gpt-6-sol` | XHigh | Codex Lead cho objective mới |
+| `planning_claude` | `claude-lead/claude-opus-5-5` | High | Claude Lead cho objective mới |
 | `planning_budget` | `opencode-lead/aibox/glm-5.2` | Max | chỉ từ DeepSeek budget Supervisor |
 | `impl` | `opencode-peer/aibox/deepseek-v4-flash` | Max | implementation bình thường, cơ khí, isolated |
 | `impl_deep` | `codex-peer/gpt-5.6-luna` | Max | implementation khó, cross-cutting, nhiều uncertainty |
@@ -24,38 +24,38 @@ Budget stack dùng các key `impl_budget`, `impl_deep_budget`, `search_budget`,
 
 `impl_deep` và `search` là custom semantic routes do Lead profile hiểu. Các Paseo skill chuẩn biết các category `impl`, `ui`, `research`, `planning`, `audit`; vì vậy khi dùng skill generic cần kiểm tra preference và brief của Lead, không tự giả định `impl_deep`/`search` là category built-in.
 
+Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc mở một bounded objective, theo tính chất việc và ưu tiên Human nếu có. Khi không có lợi thế rõ, dùng Codex. Model được pin vào binding cho suốt phiên Lead. Mỗi Lead sở hữu một objective/workstream trong một workspace; objective độc lập cần workspace/worktree riêng và chỉ chạy song song khi phạm vi ghi không chồng nhau. Giới hạn một Lead mỗi workspace do guard bảo vệ; kiểm tra chồng phạm vi giữa workspace hiện là quy tắc workflow của Supervisor.
+
 ## Model catalog theo provider
 
 ### `codex-supervisor`
 
-- Sol: Low, Medium, High, XHigh, Max, Ultra; Medium là default.
-- Luna: Max.
+- GPT-6 Sol: XHigh, model và thinking duy nhất của role provider.
 - Mục đích: governance/front door; không dùng model choice để nhận engineering ownership.
 
 ### `claude-supervisor`
 
 - Opus 4.8: Medium mặc định, High hoặc Max cho governance khó.
 - Là front door song song để thử nghiệm, không thay `planning` route.
-- Vẫn bootstrap `codex-lead/gpt-5.6-sol`; không dùng Claude native Agent/Task.
+- Có thể chọn `planning` hoặc `planning_claude` như Codex Supervisor; không dùng Claude native Agent/Task.
 - Chỉ nhận Paseo control MCP qua role proxy explicit.
 
 ### `opencode-supervisor`
 
 - DeepSeek V4 Flash trên AI Box, Max, là budget front door.
-- Chỉ được bootstrap `planning_budget`; không được tạo stable/pilot Lead.
+- Chỉ được bootstrap `planning_budget`; không được tạo Codex/Claude Lead chuẩn.
 - Dùng OpenCode role config riêng, deny native task delegation và chỉ nhận Paseo control MCP qua role proxy.
 
 ### `codex-lead`
 
-- Sol: Low, Medium, High, XHigh, Max, Ultra; Medium là default.
-- Luna: Max.
+- GPT-6 Sol: XHigh, model và thinking duy nhất của role provider.
 - Mục đích: engineering owner của workspace.
 
 ### `claude-lead`
 
-- Sonnet 5 1M: High, là model duy nhất của provider pilot.
+- Opus 5.5 1M: High, là model duy nhất của provider.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`: 1M là capacity ceiling, active window được compact sớm.
-- Chỉ được chọn bằng `planning_pilot` sau explicit Human request; stable default vẫn là Sol.
+- Được Supervisor chọn bằng `planning_claude` khi mở objective mới; Human có thể chỉ định Codex hoặc Claude.
 - Dùng `claude-room lead`, role-aware Paseo MCP và cùng Lead lease/handback contract; Claude native Agent/Task bị deny.
 
 ### `opencode-lead`

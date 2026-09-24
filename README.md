@@ -63,16 +63,18 @@ agent work, and explicitly choosing to do so.
 
 After the restart, `claude-supervisor/claude-opus-4-8` is available as a
 parallel Human-facing front door. Codex Supervisor and stable Lead use
-`gpt-6-sol` at XHigh (`codex-supervisor` and `codex-lead`). An owner-explicit pilot can instead use
-`claude-lead/claude-sonnet-5[1m]` at High with a 300K auto-compact window;
-selecting Claude for the Supervisor still does not transfer engineering
-ownership into the Supervisor.
+`gpt-6-sol` at XHigh (`codex-supervisor` and `codex-lead`). A Supervisor may
+autonomously select `claude-lead/claude-opus-5-5` at High for a new bounded
+objective, with a 300K auto-compact window; an explicit owner preference wins.
+Each Lead owns one objective/workstream in one workspace, including its bounded
+Peer tasks and same-objective follow-ups. Selecting Claude for the Supervisor
+still does not transfer engineering ownership into the Supervisor.
 
 The budget front door is `opencode-supervisor/aibox/deepseek-v4-flash` at Max.
 Selecting it deterministically activates the full budget stack:
 `opencode-lead/aibox/glm-5.2` Max for Lead, DeepSeek V4 Flash Max for every
 non-UI Peer route, and Gemini through agy for UI. It cannot silently fall back
-to the stable or Sonnet stack.
+to the standard Codex or Claude stack.
 
 ## Existing-machine update
 

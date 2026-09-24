@@ -30,7 +30,7 @@ Supervisor creates a Lead with:
 
 - `role=lead`
 - `route=planning`
-- `lead_profile=stable|pilot|budget`
+- `lead_profile=stable|claude|budget`
 - `stack_profile=standard|budget`
 - `room_kind=managed_slp`
 - `work_epoch=1`
@@ -175,7 +175,8 @@ Human `ACCEPTED` does not authorize an automatic merge. The owner-shell `land-pr
 
 Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 
-- Codex/Claude Supervisor uses `planning` and `lead_profile=stable` by default. It may use `planning_pilot` and `lead_profile=pilot` only after an explicit Human request; both use `stack_profile=standard`.
+- Codex/Claude Supervisor chooses `planning` with `lead_profile=stable` or `planning_claude` with `lead_profile=claude` at the start of a bounded objective. An explicit Human preference wins; otherwise the Supervisor selects from the approved routes, defaulting to `planning` when neither has a clear task advantage. Both use `stack_profile=standard`. The chosen provider/model/settings remain pinned to the Lead binding; changing them requires an explicit checkpoint and replacement.
+- One Lead owns one bounded objective or workstream in one workspace. Same-objective follow-ups use the work epoch protocol; unrelated objectives use separate isolated workspaces. Concurrent work in the same repository requires disjoint write scope and contracts, otherwise the Supervisor serializes it. The one-Lead-per-workspace guard is deterministic; the cross-workspace scope check is a Supervisor workflow rule, not a filesystem-enforced invariant.
 - The OpenCode DeepSeek budget Supervisor is a separate front door. It may create only `planning_budget` with `lead_profile=budget` and `stack_profile=budget`; other Supervisors may not create that Lead.
 - A budget Lead resolves every Peer category through its `*_budget` route. Non-UI routes use DeepSeek V4 Flash Max; `ui_budget` remains Gemini through agy.
 - Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model, propagates the stack profile, and normalizes required thinking.

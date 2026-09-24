@@ -25,7 +25,7 @@ class RoomRoleGuardTest(unittest.TestCase):
                 {
                     "providers": {
                         "planning": "codex-lead/gpt-6-sol",
-                        "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
+                        "planning_claude": "claude-lead/claude-opus-5-5",
                         "planning_budget": "opencode-lead/aibox/glm-5.2",
                         "impl": "opencode-peer/aibox/deepseek-v4-flash",
                         "impl_deep": "codex-peer/gpt-5.6-luna",
@@ -181,17 +181,17 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(lease["state"], "pending")
         self.assertEqual(lease["work_epoch"], 1)
 
-    def test_supervisor_rewrites_claude_pilot_lead(self) -> None:
+    def test_supervisor_rewrites_autoselected_claude_lead(self) -> None:
         result = self.run_guard(
             "supervisor",
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "claude-lead/claude-sonnet-5[1m]",
-                    "workspaceId": "workspace-pilot",
-                    "title": "Pilot Lead",
+                    "provider": "claude-lead/claude-opus-5-5",
+                    "workspaceId": "workspace-claude",
+                    "title": "Claude Lead",
                     "initialPrompt": "Own the objective.",
-                    "labels": {"lead_profile": "pilot"},
+                    "labels": {"lead_profile": "claude"},
                 },
             ),
             self.supervisor_id,
@@ -199,28 +199,46 @@ class RoomRoleGuardTest(unittest.TestCase):
         updated = result["hookSpecificOutput"]["updatedInput"]
         self.assertEqual(updated["labels"]["role"], "lead")
         self.assertEqual(updated["labels"]["route"], "planning")
-        self.assertEqual(updated["labels"]["lead_profile"], "pilot")
+        self.assertEqual(updated["labels"]["lead_profile"], "claude")
         self.assertEqual(updated["labels"]["stack_profile"], "standard")
         self.assertEqual(updated["settings"]["modeId"], "bypassPermissions")
         self.assertEqual(updated["settings"]["thinkingOptionId"], "high")
-        lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
-        self.assertEqual(lease["provider"], "claude-lead/claude-sonnet-5[1m]")
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-claude"]
+        self.assertEqual(lease["provider"], "claude-lead/claude-opus-5-5")
 
-    def test_supervisor_rejects_pilot_provider_without_pilot_label(self) -> None:
+    def test_supervisor_rejects_claude_provider_without_claude_label(self) -> None:
         result = self.run_guard(
             "supervisor",
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "claude-lead/claude-sonnet-5[1m]",
-                    "workspaceId": "workspace-pilot",
-                    "title": "Pilot Lead",
+                    "provider": "claude-lead/claude-opus-5-5",
+                    "workspaceId": "workspace-claude",
+                    "title": "Claude Lead",
                     "initialPrompt": "Own the objective.",
                 },
             ),
             self.supervisor_id,
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_supervisor_rejects_retired_sonnet_pilot_route(self) -> None:
+        result = self.run_guard(
+            "supervisor",
+            self.pre(
+                "mcp__paseo__create_agent",
+                {
+                    "provider": "claude-lead/claude-sonnet-5[1m]",
+                    "workspaceId": "workspace-old-pilot",
+                    "title": "Old Pilot Lead",
+                    "initialPrompt": "Own the objective.",
+                    "labels": {"lead_profile": "pilot"},
+                },
+            ),
+            self.supervisor_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("workspace-old-pilot", json.loads(self.leases.read_text())["leases"])
 
     def test_budget_supervisor_rewrites_glm_lead_contract(self) -> None:
         self.write_agent(
@@ -1093,13 +1111,13 @@ const r=await tools.mcp__paseo__create_agent({
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["state"], "pending")
 
-    def test_supervisor_nested_exec_accepts_claude_pilot_contract(self) -> None:
+    def test_supervisor_nested_exec_accepts_claude_contract(self) -> None:
         source = """
 const r=await tools.mcp__paseo__create_agent({
-  workspaceId:"workspace-pilot",
-  provider:"claude-lead/claude-sonnet-5[1m]",
+  workspaceId:"workspace-claude",
+  provider:"claude-lead/claude-opus-5-5",
   notifyOnFinish:false,
-  labels:{role:"lead",route:"planning",lead_profile:"pilot",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
+  labels:{role:"lead",route:"planning",lead_profile:"claude",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
   settings:{modeId:"bypassPermissions",thinkingOptionId:"high"},
   initialPrompt:`Own the objective.`
 });text(r)
@@ -1110,8 +1128,8 @@ const r=await tools.mcp__paseo__create_agent({
             self.supervisor_id,
         )
         self.assertIsNone(result)
-        lease = json.loads(self.leases.read_text())["leases"]["workspace-pilot"]
-        self.assertEqual(lease["provider"], "claude-lead/claude-sonnet-5[1m]")
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-claude"]
+        self.assertEqual(lease["provider"], "claude-lead/claude-opus-5-5")
 
     def test_lead_nested_exec_requires_full_static_route_contract(self) -> None:
         missing_mode = """

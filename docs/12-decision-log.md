@@ -153,3 +153,18 @@ workspace/parent defaults từ caller record trước role filter + guard; regre
 test giữ đây là control surface duy nhất.
 Plugin không được đưa vào lifecycle truth; UI tương lai chỉ có thể là thin client
 trên protected operations.
+
+## D21 — Supervisor tự chọn Codex hoặc Claude Lead cho từng workstream
+
+D17 là cấu hình pilot cũ. Standard Supervisor nay được chọn giữa
+`planning` → `codex-lead/gpt-6-sol` XHigh và
+`planning_claude` → `claude-lead/claude-opus-5-5` High khi mở objective mới.
+Không cần Human gọi tên Claude trước; một chỉ định rõ từ Human được ưu tiên.
+Khi không có lợi thế rõ cho một route, chọn Codex. Guard kiểm tra exact route,
+profile label, mode, thinking và lease; model không đổi giữa phiên.
+
+Một Lead sở hữu một bounded objective/workstream, có thể giao nhiều Peer và
+xử lý follow-up của chính objective đó qua work epoch. Objective độc lập cần
+workspace/worktree riêng; nếu write scope hoặc contracts chồng nhau, Supervisor
+xếp tuần tự. Guard bảo vệ một Lead mỗi workspace; kiểm tra chồng phạm vi giữa
+các workspace vẫn là quy tắc workflow, chưa được enforcement bằng máy.

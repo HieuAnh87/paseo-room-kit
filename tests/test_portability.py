@@ -97,7 +97,7 @@ class PortabilityTest(unittest.TestCase):
         self.assertEqual(claude_lead["extends"], "claude")
         self.assertEqual(
             claude_lead["models"][0]["id"],
-            "claude-sonnet-5[1m]",
+            "claude-opus-5-5",
         )
         self.assertEqual(
             claude_lead["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],

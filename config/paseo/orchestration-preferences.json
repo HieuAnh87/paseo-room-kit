@@ -6,7 +6,7 @@
     "ui": "gemini-ui/gemini-3.6-flash-medium",
     "research": "opencode-peer/aibox/deepseek-v4-flash",
     "planning": "codex-lead/gpt-6-sol",
-    "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
+    "planning_claude": "claude-lead/claude-opus-5-5",
     "planning_budget": "opencode-lead/aibox/glm-5.2",
     "impl_budget": "opencode-peer/aibox/deepseek-v4-flash",
     "impl_deep_budget": "opencode-peer/aibox/deepseek-v4-flash",
@@ -17,10 +17,11 @@
     "audit": "codex-peer/gpt-5.6-luna"
   },
   "preferences": [
-    "The human-facing Supervisor must use the planning provider preference by default when bootstrapping the internal Lead seat; never create that Lead with a stock provider.",
+    "The human-facing Supervisor autonomously selects planning or planning_claude for each new bounded objective. Honor an explicit Human provider choice; otherwise use planning when neither route has a clear task advantage. Never create that Lead with a stock provider.",
     "The stable Codex Lead and Codex Supervisor use GPT-6 Sol with XHigh thinking.",
-    "Use planning_pilot only when the Human explicitly requests the Sonnet Lead pilot. Mark that Lead with lead_profile=pilot; otherwise use planning and lead_profile=stable.",
-    "The Claude Lead pilot uses Sonnet 5 1M at High thinking with a 300000-token auto-compact window. Treat 1M as headroom, not a target working set.",
+    "Use planning with lead_profile=stable for Codex Lead or planning_claude with lead_profile=claude for Claude Lead. Select once before creation, pin the route for that work epoch, and never switch an active Lead's provider in place.",
+    "The Claude Lead uses Opus 5.5 at High thinking with a 300000-token auto-compact window. Treat its 1M context as headroom, not a target working set.",
+    "One Lead owns one bounded objective/workstream in one workspace. Keep follow-ups within its work epoch protocol; create a separate isolated workspace for an independent objective only when write scopes do not overlap, otherwise serialize.",
     "The opencode-supervisor budget front door must use planning_budget and propagate stack_profile=budget. Its GLM Lead must use the *_budget Peer routes; UI remains ui_budget through Gemini/agy.",
     "The Lead must use the impl, impl_deep, search, research, or ui provider preference when creating a bounded Peer; never create an internal Peer with the stock codex provider.",
     "Use impl (DeepSeek V4 Flash) for normal, mechanical, isolated implementation. Use impl_deep (Codex Peer Luna) for difficult, cross-cutting, or uncertainty-heavy implementation; use audit (Codex Peer Luna) for review. For codex-peer impl_deep or audit work, request Max thinking.",

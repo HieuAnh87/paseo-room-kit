@@ -60,9 +60,9 @@ Supervisor <redacted-agent>
 | Provider | Trạng thái/ý nghĩa |
 |---|---|
 | `claude-supervisor` | custom Human-facing Supervisor thử nghiệm, dùng Opus 4.8 Medium/High/Max |
-| `codex-supervisor` | custom Supervisor, dùng Sol/Luna |
-| `codex-lead` | custom Lead, dùng Sol/Luna |
-| `claude-lead` | custom Lead pilot, dùng Sonnet 5 1M High với auto-compact window 300K |
+| `codex-supervisor` | custom Supervisor, GPT-6 Sol XHigh |
+| `codex-lead` | custom Lead, GPT-6 Sol XHigh |
+| `claude-lead` | custom Lead, Opus 5.5 High với auto-compact window 300K |
 | `codex-peer` | custom bounded Codex Peer, dùng Sol/Luna |
 | `opencode-peer` | custom OpenCode ACP Peer, AI Box DeepSeek/GLM |
 | `gemini-ui` | custom ACP provider qua antigravity-acp, model catalog giới hạn về Gemini |

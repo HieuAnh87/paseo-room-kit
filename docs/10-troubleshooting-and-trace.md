@@ -36,7 +36,7 @@ Root cause:
 Fix hiện tại:
 
 - tạo `orchestration-preferences.json`;
-- map `planning` → `codex-lead/gpt-5.6-sol`;
+- map `planning` → `codex-lead/gpt-6-sol` and `planning_claude` → `claude-lead/claude-opus-5-5`;
 - map Peer routes → custom provider;
 - thêm explicit provider verification sau create;
 - stock chain cũ giữ history, không tiếp tục chain misrouted.
