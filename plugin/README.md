@@ -1,6 +1,6 @@
 # Room Flow plugin
 
-Optional, read-only Paseo 0.9.1 sidebar view for managed `paseo-room-kit` rooms.
+Optional, read-only Paseo 0.9.x sidebar view for managed `paseo-room-kit` rooms.
 It joins the daemon's paged workspace and agent directory with the kit's
 existing `lead-leases.json`. The lease remains the source of room authority;
 Paseo remains the source of session status. The plugin creates no lane ledger,
@@ -16,7 +16,7 @@ default and can be expanded.
 
 ## Requirements and local checks
 
-- Paseo daemon **and app** version `>=0.9.1 <0.10.0`.
+- Paseo daemon **and app** version `>=0.9.0 <0.10.0`.
 - Node.js 22 or later for the local test command.
 - The room-kit lease registry on the same machine as the daemon. The path is
   `ROOM_GUARD_LEASES_PATH`, then `PASEO_ROOM_LEASES_PATH`, then
@@ -30,7 +30,7 @@ npm run typecheck
 npm test
 ```
 
-`@getpaseo/plugin` is a development dependency pinned to 0.9.1 for checking
+`@getpaseo/plugin` is a development dependency pinned to 0.9.0 for checking
 the API. Paseo supplies SDK, React, React Native and Zod host modules at
 runtime. The plugin uses no external service.
 
@@ -40,7 +40,7 @@ Paseo plugins are trusted code. Its backend runs with the daemon user's file
 access, and the client surface runs inside the app. Review this directory
 before installing. The kit installer does not install or enable this plugin.
 
-When using a matching Paseo 0.9.1 CLI, daemon and app, check that the daemon's
+When using a matching Paseo 0.9.x CLI, daemon and app, check that the daemon's
 global plugin switch is already enabled. If it is not, get the machine owner's
 authorization before enabling it. Then install this directory as an absolute
 path on the daemon host:

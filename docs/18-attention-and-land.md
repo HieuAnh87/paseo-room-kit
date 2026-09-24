@@ -18,7 +18,7 @@ paseo-room-workflow answer-ask REQUEST.json --apply
 
 ## Flow/Health
 
-Plugin trong [`plugin/`](../plugin/) dành cho Paseo 0.9.1 hiển thị dữ liệu read-only từ Paseo và lease hiện có: room, Lead/Peer, decision, câu hỏi và tín hiệu attention. Nó không tạo lane ledger và không thực hiện các operation được bảo vệ. Plugin được cài riêng, không nằm trong installer của kit; xem README trong thư mục plugin cho yêu cầu và lệnh cài. Kit pin Paseo 0.9.1; plugin vẫn là thành phần tùy chọn.
+Plugin trong [`plugin/`](../plugin/) tương thích Paseo 0.9.0–0.9.x và hiển thị dữ liệu read-only từ Paseo và lease hiện có: room, Lead/Peer, decision, câu hỏi và tín hiệu attention. Nó không tạo lane ledger và không thực hiện các operation được bảo vệ. Plugin được cài riêng, không nằm trong installer của kit; xem README trong thư mục plugin cho yêu cầu và lệnh cài. Kit pin CLI/daemon Paseo 0.9.1; plugin vẫn là thành phần tùy chọn.
 
 ## Land kết quả đã được Human chấp nhận
 

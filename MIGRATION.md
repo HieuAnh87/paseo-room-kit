@@ -107,7 +107,7 @@ polling loop.
 
 Paseo must reload provider config before new sessions use it. Restart only when no active agent needs preservation. After restart, rerun `./scripts/doctor.sh --live` and perform the read-only Supervisor → Lead → Peer smoke test documented in `docs/09-operations-runbook.md`.
 
-The optional Room Flow plugin is installed separately on a matching 0.9.1
+The optional Room Flow plugin is installed separately on a compatible 0.9.x
 daemon and app. It displays the existing lease and Paseo state without owning
 or mirroring lifecycle authority.
 
