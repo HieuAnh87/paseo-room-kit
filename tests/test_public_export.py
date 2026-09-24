@@ -114,7 +114,7 @@ class PublicExportTest(unittest.TestCase):
         root_lock = json.loads(
             (ROOT / "versions.lock.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(root_lock["paseo"], "0.8.0")
+        self.assertEqual(root_lock["paseo"], "0.9.1")
 
         public_lock_path = ROOT / "public-export/versions.lock.json"
         if not public_lock_path.is_file():

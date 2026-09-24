@@ -42,7 +42,7 @@ Paseo CLI.
 Managed lifecycle uses a version-2 lease registry with room kind, work epoch,
 revision, and evidence digest. Native Peer callbacks remain primary;
 `recover_peer_callbacks` is the one-shot digest-deduplicated recovery path.
-Every internal custom provider sets Paseo 0.8 `paseoTools.enabled=false`, so
+Every internal custom provider sets Paseo 0.9.1 `paseoTools.enabled=false`, so
 the role-aware proxy remains its only control surface if global injection is
 enabled later. Legacy Lead cleanup is workspace/parentage/lease fenced and does
 not trust native idle status. A future plugin may only be a thin UI over these

@@ -28,7 +28,7 @@ cd paseo-room-kit
 ```
 
 Compare installed versions with `versions.lock.json`. The Paseo pin is now
-`0.8.0`; the root lock's `captured_at` remains the last full tool-inventory
+`0.9.1`; the root lock's `captured_at` remains the last full tool-inventory
 snapshot, because this bump intentionally refreshes Paseo only. Do not treat
 the other pins as freshly captured. A newer version is not automatically
 wrong, but provider/model schemas and MCP behavior must be revalidated.
@@ -52,7 +52,7 @@ The script checks out the pinned source commit and builds the binary for the cur
 The installer renders `{{HOME}}` and the platform-specific Antigravity ACP binary path. It does not install credentials, project MCP secrets, agent history, or active lease state.
 
 The canonical provider template sets `paseoTools.enabled=false` on every
-internal custom Supervisor, Lead, Peer, and UI provider. This is the Paseo 0.8
+internal custom Supervisor, Lead, Peer, and UI provider. This is the Paseo 0.9.1
 per-provider defense: even if global native tool injection is enabled later,
 room roles receive only the role-aware proxy control surface.
 
@@ -107,9 +107,9 @@ polling loop.
 
 Paseo must reload provider config before new sessions use it. Restart only when no active agent needs preservation. After restart, rerun `./scripts/doctor.sh --live` and perform the read-only Supervisor → Lead → Peer smoke test documented in `docs/09-operations-runbook.md`.
 
-No plugin migration is required. There is no lifecycle plugin in this kit; a
-future plugin may display or invoke protected operations only and must not own
-or mirror lifecycle state.
+The optional Room Flow plugin is installed separately on a matching 0.9.1
+daemon and app. It displays the existing lease and Paseo state without owning
+or mirroring lifecycle authority.
 
 ## 8. Supply private machine-local configuration
 

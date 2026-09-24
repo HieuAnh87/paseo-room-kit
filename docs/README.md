@@ -61,7 +61,7 @@ Tài liệu này là bản giải thích và snapshot; các file dưới đây m
 
 Inventory snapshot rộng được chụp ngày `2026-08-03` lúc khoảng `18:55`
 (Asia/Ho_Chi_Minh) và có thể stale. Paseo baseline riêng đã được revalidate và
-pin ở `0.8.0`; dùng doctor live để xác nhận runtime hiện tại.
+pin ở `0.9.1`; dùng doctor live để xác nhận runtime hiện tại.
 
 Portable kit không commit `snapshots/`: chúng chứa runtime identity, đường dẫn và trạng thái dễ lỗi thời. Chạy `../scripts/doctor.sh --live` trên từng máy để kiểm tra routing/runtime. `auth.json`, URI database, API key, token, password và secret environment luôn nằm ngoài repository.
 

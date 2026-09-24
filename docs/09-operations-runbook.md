@@ -140,7 +140,7 @@ Nếu một tool biến mất:
 2. xem tool thuộc Codex baseline hay Paseo control injection;
 3. kiểm tra `injectIntoAgents=false` và mọi custom internal provider có
    `paseoTools.enabled=false`;
-4. Paseo 0.8 dùng per-provider `paseoTools`; không dùng field lịch sử
+4. Paseo 0.9.1 dùng per-provider `paseoTools`; không dùng field lịch sử
    `injectIntoProviders`;
 5. kiểm tra Supervisor/Lead runtime có `[mcp_servers.paseo]` trỏ `paseo-room-mcp`, Peer runtime không có;
 6. chạy stdio proxy smoke test và xác nhận wrong route/duplicate Lead bị deny trước upstream;

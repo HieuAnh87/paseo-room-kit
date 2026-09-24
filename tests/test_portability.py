@@ -169,7 +169,7 @@ class PortabilityTest(unittest.TestCase):
             version = plistlib.load(stream)["CFBundleShortVersionString"]
         expected = json.loads((ROOT / "versions.lock.json").read_text())["paseo"]
         self.assertEqual(version, expected)
-        self.assertEqual(version, "0.8.0")
+        self.assertEqual(version, "0.9.1")
 
         data = asar_path.read_bytes()
         header_length = struct.unpack("<I", data[12:16])[0]

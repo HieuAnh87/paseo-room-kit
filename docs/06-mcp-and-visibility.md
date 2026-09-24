@@ -17,7 +17,7 @@ Paseo daemon có:
 }
 ```
 
-Paseo `0.8.0` hỗ trợ policy theo provider qua
+Paseo `0.9.1` hỗ trợ policy theo provider qua
 `agents.providers.<id>.paseoTools`. Canonical config vừa giữ
 `injectIntoAgents=false`, vừa đặt `paseoTools.enabled=false` cho cả chín
 internal custom providers. Vì vậy nếu global injection vô tình bật về sau,
@@ -64,7 +64,7 @@ Chi tiết command/env thật chỉ đọc từ config local có kiểm soát. [
 4. Database/observability MCP có thể có quyền mạnh; không coi tool availability là authorization cho product decision.
 5. `MCP server available` không đồng nghĩa `tool result accepted`; Lead vẫn cần validate evidence.
 6. Không thêm lại field lịch sử `injectIntoProviders`; dùng
-   `paseoTools.enabled=false` đúng schema 0.8.
+   `paseoTools.enabled=false` đúng schema 0.9.1.
 7. Global `injectIntoAgents` vẫn nên fail closed ở `false`; per-provider deny
    là defense in depth, không phải lý do mở global injection.
 

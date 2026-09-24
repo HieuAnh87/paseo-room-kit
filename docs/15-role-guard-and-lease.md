@@ -7,12 +7,12 @@
 
 Paseo native quản lý parentage, callback, permissions, archive và runtime lifecycle. Paseo không có native Supervisor/Lead/Peer authorization, provider route policy, engineering acceptance hoặc một-Lead-per-workspace lease.
 
-Paseo 0.8 có per-provider `paseoTools.enabled`. Mọi custom internal SLP
+Paseo 0.9.1 có per-provider `paseoTools.enabled`. Mọi custom internal SLP
 provider đặt field này thành `false`, nên global injection nếu bật sau này vẫn
 không cấp native unrestricted catalog. Supervisor/Lead chỉ nhận role-aware
 proxy; Peer không có control surface.
 
-Paseo 0.8 áp cùng policy cho caller-scoped `/mcp/agents`. Khi endpoint đó trả
+Paseo 0.9.1 áp cùng policy cho caller-scoped `/mcp/agents`. Khi endpoint đó trả
 empty catalog hoặc tool/method-not-found, proxy gọi top-level catalog và tự khôi phục chỉ caller
 workspace/parent defaults, sau đó vẫn role-filter và chạy deterministic guard.
 Regression test bắt buộc blocked tools không xuất hiện và guarded calls vẫn chạy.

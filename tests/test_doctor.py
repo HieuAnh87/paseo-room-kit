@@ -123,8 +123,8 @@ fi
         self,
         mode: str,
         *,
-        cli_version: str = "0.8.0",
-        status_json: str = '{"daemonVersion":"0.8.0"}',
+        cli_version: str = "0.9.1",
+        status_json: str = '{"daemonVersion":"0.9.1"}',
         role: str | None = None,
         wrapper_active: bool = False,
         wrapper_contents: bytes | None = None,
@@ -170,7 +170,7 @@ fi
     def test_preflight_requires_effective_cli_version_pin(self) -> None:
         result = self.run_doctor("--preflight")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Paseo CLI version matches pin 0.8.0", result.stdout)
+        self.assertIn("Paseo CLI version matches pin 0.9.1", result.stdout)
 
         result = self.run_doctor("--preflight", cli_version="0.7.9")
         self.assertNotEqual(result.returncode, 0)
@@ -179,10 +179,10 @@ fi
     def test_live_requires_parseable_matching_daemon_version(self) -> None:
         result = self.run_doctor(
             "--live",
-            status_json='{"connectedDaemon":"reachable","daemonVersion":"0.8.0"}',
+            status_json='{"connectedDaemon":"reachable","daemonVersion":"0.9.1"}',
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Paseo daemon version matches pin 0.8.0", result.stdout)
+        self.assertIn("Paseo daemon version matches pin 0.9.1", result.stdout)
 
         for status_json, message in (
             ("not-json", "invalid or missing string daemonVersion"),

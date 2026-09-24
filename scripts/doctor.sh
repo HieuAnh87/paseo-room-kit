@@ -101,7 +101,7 @@ check_daemon_version() {
 
   local status_json daemon_version
   if ! status_json="$(paseo daemon status --json 2>/dev/null)"; then
-    fail "Paseo daemon status probe failed (expected Paseo 0.8 JSON)"
+    fail "Paseo daemon status probe failed (expected Paseo ${paseo_pin} JSON)"
     return 0
   fi
 
@@ -120,7 +120,7 @@ check_daemon_version() {
       .[0].daemonVersion
     end
   ')"; then
-    fail "Paseo daemon status JSON is invalid or missing string daemonVersion (Paseo 0.8 schema)"
+    fail "Paseo daemon status JSON is invalid or missing string daemonVersion (Paseo ${paseo_pin} schema)"
   else
     pass "Paseo daemon reachable"
     if [[ "$daemon_version" != "$paseo_pin" ]]; then

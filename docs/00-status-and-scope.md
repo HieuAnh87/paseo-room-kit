@@ -8,6 +8,9 @@ Setup hiện tại đã có đủ topology Human-facing Supervisor → Lead → 
 
 ## Runtime snapshot
 
+Bảng dưới là snapshot lịch sử của lần kiểm kê trước. Pin Paseo hiện tại trong
+`versions.lock.json` là `0.9.1`; kiểm tra app/CLI/daemon live bằng doctor.
+
 | Hạng mục | Giá trị tại thời điểm chụp |
 |---|---|
 | Paseo CLI/daemon | `0.8.0` |

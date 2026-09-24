@@ -27,7 +27,7 @@ The repository contains role profiles, provider routing, the role-aware Paseo MC
 - Human accept/abandon, bounded reopen, uncertain delivery resolution, and
   archive use protected epoch-aware operations; generic prompt/archive bypasses
   are denied.
-- Custom internal SLP providers set Paseo 0.8 `paseoTools.enabled=false`;
+- Custom internal SLP providers set Paseo 0.9.1 `paseoTools.enabled=false`;
   the role-aware proxy remains their only Paseo control surface even if global
   tool injection is enabled later.
 - Legacy Lead visibility and cleanup use workspace + parentage + lease authority
