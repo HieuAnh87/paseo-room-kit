@@ -44,11 +44,11 @@ PEER_OUTCOMES = {
 }
 
 ROUTE_THINKING = {
-    "impl": "max",
-    "impl_deep": "max",
-    "search": "low",
+    "impl": "medium",
+    "impl_deep": "medium",
+    "search": "medium",
     "research": "max",
-    "audit": "max",
+    "audit": "high",
 }
 
 TARGET_MUTATIONS = {
@@ -93,7 +93,7 @@ EXEC_SENSITIVE_NAMES = {"create_agent", *TARGET_MUTATIONS, *WORKSPACE_MUTATIONS}
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--role", choices=("supervisor", "lead", "peer"), required=True)
+    parser.add_argument("--role", choices=("supervisor", "lead", "peer", "watcher"), required=True)
     return parser.parse_args()
 
 
@@ -604,7 +604,7 @@ def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
         return
     if provider.startswith("claude-lead/"):
         settings["modeId"] = "bypassPermissions"
-        settings["thinkingOptionId"] = "high"
+        settings["thinkingOptionId"] = "xhigh"
         return
     if provider.startswith("opencode-lead/"):
         settings["modeId"] = "build"
@@ -623,8 +623,8 @@ def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("claude-lead/"):
         if settings.get("modeId") != "bypassPermissions":
             deny("Claude Lead creation requires settings.modeId: bypassPermissions.")
-        if settings.get("thinkingOptionId") != "high":
-            deny("Claude Lead creation requires thinkingOptionId: high.")
+        if settings.get("thinkingOptionId") != "xhigh":
+            deny("Claude Lead creation requires thinkingOptionId: xhigh.")
         return
     if provider.startswith("opencode-lead/"):
         if settings.get("modeId") != "build":
@@ -816,6 +816,8 @@ def guard_create_agent(
         disposition = labels.get("disposition", "reviewer" if route == "audit" else "engineer").lower()
         if disposition not in {"engineer", "architect", "reviewer", "scout"}:
             deny("Peer disposition must be engineer, architect, reviewer or scout.")
+        if route == "audit" and disposition != "reviewer":
+            deny("Audit route requires a read-only reviewer disposition.")
         labels["disposition"] = disposition
         labels["write_mode"] = "write" if disposition == "engineer" else "read_only"
         prompt = updated.get("initialPrompt", "")
@@ -838,6 +840,8 @@ def guard_create_agent(
             settings["thinkingOptionId"] = required_thinking
         if provider.startswith("codex-peer/"):
             settings["modeId"] = "full-access"
+        if provider.startswith("claude-reviewer/"):
+            settings["modeId"] = "plan"
         if provider.startswith("opencode-peer/"):
             settings["modeId"] = "build"
 
@@ -900,6 +904,8 @@ def guard_nested_create_agent(
     allowed_routes = {"impl", "impl_deep", "search", "ui", "research", "audit"}
     if route not in allowed_routes:
         deny(f"Lead must use an allowed static Peer route, not {route!r}.")
+    if route == "audit" and (labels.get("disposition") != "reviewer" or labels.get("write_mode") != "read_only"):
+        deny("Nested audit Peer requires reviewer disposition and read-only scope.")
     stack_profile = current_lead_stack_profile()
     provider_key = peer_route_provider_key(route, stack_profile)
     expected = providers.get(provider_key)
@@ -923,6 +929,8 @@ def guard_nested_create_agent(
         deny(f"Peer route {route} requires thinkingOptionId: {required_thinking}.")
     if provider.startswith("codex-peer/") and settings.get("modeId") != "full-access":
         deny("Codex Peer creation requires settings.modeId: full-access.")
+    if provider.startswith("claude-reviewer/") and settings.get("modeId") != "plan":
+        deny("Claude Reviewer creation requires settings.modeId: plan.")
     if provider.startswith("opencode-peer/") and settings.get("modeId") != "build":
         deny("OpenCode Peer creation requires settings.modeId: build.")
 
@@ -1037,8 +1045,10 @@ def guard_bash(role: str, tool_input: dict[str, Any]) -> None:
     command = tool_input.get("command")
     if not isinstance(command, str):
         return
-    if role == "peer" and ANY_PASEO_COMMAND_RE.search(command):
-        deny("Peer cannot invoke the Paseo CLI.")
+    if role == "watcher":
+        deny("Watcher cannot run Bash; use the read-only Paseo tools.")
+    if role in {"peer", "watcher"} and ANY_PASEO_COMMAND_RE.search(command):
+        deny(f"{role.title()} cannot invoke the Paseo CLI.")
     if DIRECT_PASEO_MUTATION_RE.search(command):
         deny("Direct Paseo mutations are blocked; use the guarded Paseo MCP tools.")
 
@@ -1047,8 +1057,8 @@ def guard_exec(role: str, hook_input: dict[str, Any], raw_tool_input: Any) -> No
     source = exec_source(raw_tool_input)
     if not source:
         return
-    if role == "peer" and "mcp__paseo__" in source:
-        deny("Peer cannot use Paseo orchestration tools through exec.")
+    if role in {"peer", "watcher"} and "mcp__paseo__" in source:
+        deny(f"{role.title()} cannot use Paseo orchestration tools through exec.")
 
     calls = list(iter_exec_paseo_calls(source))
     direct_sensitive = [item for item in calls if item[0] in EXEC_SENSITIVE_NAMES]
@@ -1219,6 +1229,8 @@ def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
         return
     if role == "peer":
         deny("Peer cannot use Paseo orchestration tools.")
+    if role == "watcher" and paseo_name not in {"list_agents", "list_workspaces", "list_room_attention"}:
+        deny("Watcher may use read-only room inspection tools only.")
     if paseo_name == "create_agent":
         guard_create_agent(role, hook_input, tool_input)
     if paseo_name in TARGET_MUTATIONS:

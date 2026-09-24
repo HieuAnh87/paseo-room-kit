@@ -158,8 +158,74 @@
             "contextWindowMaxTokens": 1000000,
             "thinkingOptions": [
               {
+                "id": "xhigh",
+                "label": "XHigh",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "claude-reviewer": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "claude",
+        "label": "Claude Reviewer",
+        "description": "Read-only independent candidate review using Opus 5.5",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "peer"
+        ],
+        "env": {
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task"
+        ],
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
                 "id": "high",
                 "label": "High",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "claude-watcher": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "claude",
+        "label": "Claude Room Watcher",
+        "description": "Independent read-only room attention scan using Sonnet 5",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "watcher"
+        ],
+        "env": {
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task"
+        ],
+        "models": [
+          {
+            "id": "claude-sonnet-5",
+            "label": "Sonnet 5",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
                 "isDefault": true
               }
             ]
@@ -179,61 +245,14 @@
         ],
         "models": [
           {
-            "id": "gpt-5.6-sol",
-            "label": "Sol",
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
             "isDefault": true,
             "thinkingOptions": [
               {
-                "id": "low",
-                "label": "Low"
-              },
-              {
                 "id": "medium",
                 "label": "Medium",
                 "isDefault": true
-              },
-              {
-                "id": "high",
-                "label": "High"
-              },
-              {
-                "id": "xhigh",
-                "label": "XHigh"
-              },
-              {
-                "id": "max",
-                "label": "Max"
-              },
-              {
-                "id": "ultra",
-                "label": "Ultra"
-              }
-            ]
-          },
-          {
-            "id": "gpt-5.6-luna",
-            "label": "Luna",
-            "thinkingOptions": [
-              {
-                "id": "low",
-                "label": "Low"
-              },
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              },
-              {
-                "id": "high",
-                "label": "High"
-              },
-              {
-                "id": "xhigh",
-                "label": "XHigh"
-              },
-              {
-                "id": "max",
-                "label": "Max"
               }
             ]
           }

@@ -64,11 +64,15 @@ agent work, and explicitly choosing to do so.
 After the restart, `claude-supervisor/claude-opus-4-8` is available as a
 parallel Human-facing front door. Codex Supervisor and stable Lead use
 `gpt-6-sol` at XHigh (`codex-supervisor` and `codex-lead`). A Supervisor may
-autonomously select `claude-lead/claude-opus-5-5` at High for a new bounded
+autonomously select `claude-lead/claude-opus-5-5` at XHigh for a new bounded
 objective, with a 300K auto-compact window; an explicit owner preference wins.
 Each Lead owns one objective/workstream in one workspace, including its bounded
 Peer tasks and same-objective follow-ups. Selecting Claude for the Supervisor
 still does not transfer engineering ownership into the Supervisor.
+
+In the standard stack, bounded implementation/search Peers use GPT-6 Luna
+Medium, candidate review uses a fresh read-only Claude Opus 5.5 High Reviewer,
+and an independent Sonnet 5 Medium Watcher scans managed rooms every hour.
 
 The budget front door is `opencode-supervisor/aibox/deepseek-v4-flash` at Max.
 Selecting it deterministically activates the full budget stack:

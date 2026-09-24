@@ -45,7 +45,7 @@ claude-supervisor
 
 claude-lead
   → ~/.local/bin/claude-room lead
-  → Claude Opus 5.5 1M · High
+  → Claude Opus 5.5 1M · XHigh
   → 300K auto-compact window + Lead instructions/settings/Paseo MCP
 ```
 
@@ -89,14 +89,16 @@ Local installation:
 
 | Nhu cầu | Chọn |
 |---|---|
-| mechanical implementation | `opencode-peer/aibox/deepseek-v4-flash` |
-| hard implementation/review | `codex-peer/gpt-5.6-luna` |
+| bounded implementation/search | `codex-peer/gpt-6-luna` Medium |
+| independent review | `claude-reviewer/claude-opus-5-5` High |
+| independent room watch | `claude-watcher/claude-sonnet-5` Medium |
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
 | governance Supervisor thử nghiệm | `claude-supervisor/claude-opus-4-8` |
 | engineering Lead dài hạn | `claude-lead/claude-opus-5-5` |
 | full budget Supervisor | `opencode-supervisor/aibox/deepseek-v4-flash` |
 | full budget Lead | `opencode-lead/aibox/glm-5.2` |
+| budget non-UI Peer | `opencode-peer/aibox/deepseek-v4-flash` Max |
 | direct interactive Claude | built-in `claude`, không tự đưa vào Peer route |
 
 ## Auth/config boundary

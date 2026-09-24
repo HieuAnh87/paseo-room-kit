@@ -167,6 +167,8 @@ Plugins and UI may visualize `list_slp_decisions` output or invoke these protect
 
 `inspect_peer_attention` may signal a pending permission, a terminal Peer without handback, or a possible missing handback after an idle turn. These are read-only suspicions for Lead to inspect. They never set `DONE`, `ACCEPTED`, or a Human decision; `recover_peer_callbacks` remains the bounded evidence-recovery operation.
 
+An independent Watcher may read the active agent/workspace lists and current room attention for any managed Lead. It has no decision, lifecycle, agent mutation, or engineering authority. Its hourly scheduled run reports observed signals only; it never infers acceptance, sends prompts, or changes a lease.
+
 ## Optional local Git land
 
 Human `ACCEPTED` does not authorize an automatic merge. The owner-shell `land-prepare` creates a read-only plan for an already accepted, clean, fully committed candidate in a managed room with candidate proof. `land-apply` requires a separate exact plan-digest approval and `--apply`. Before fast-forwarding a local target branch it rechecks authority epoch/revision, candidate/review evidence, source and target commit IDs, clean worktrees, and idle room writers; any drift requires a new plan. The target branch may be checked out in an explicitly named clean worktree. The operation does not commit, push, run a test command, or override a red gate. Archive after land if the same active lease is needed for the check. Manual Git processes outside managed rooms are cooperative writers and must stay quiescent during land.
@@ -180,6 +182,7 @@ Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 - The OpenCode DeepSeek budget Supervisor is a separate front door. It may create only `planning_budget` with `lead_profile=budget` and `stack_profile=budget`; other Supervisors may not create that Lead.
 - A budget Lead resolves every Peer category through its `*_budget` route. Non-UI routes use DeepSeek V4 Flash Max; `ui_budget` remains Gemini through agy.
 - Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model, propagates the stack profile, and normalizes required thinking.
+- Standard `impl`, `impl_deep`, and `search` use GPT-6 Luna Medium. Standard `audit` uses a fresh Claude Opus 5.5 High Reviewer in Plan Mode with `disposition=reviewer` and read-only scope. Budget Peer routes retain DeepSeek Max.
 - Stock providers are invalid for internal Lead or Peer seats.
 - Room launchers shadow the direct Paseo CLI; internal orchestration must use the role-aware MCP proxy.
 

@@ -2,7 +2,7 @@
 
 ## Kết luận ngắn
 
-Setup hiện tại đã có đủ topology Human-facing Supervisor → Lead → Peer, với provider custom tách vai trò. Paseo daemon đang sống, `gemini-ui` đã được nhận, và routing mới đã có DeepSeek cho implementation, Luna cho deep implementation/audit/search, Gemini cho UI.
+Setup hiện tại có topology Human-facing Supervisor → Lead → Peer, với provider custom tách vai trò. Standard stack dùng GPT-6 Luna Medium cho bounded Peer, Claude Opus 5.5 High cho Reviewer và Gemini cho UI; budget stack giữ DeepSeek/GLM.
 
 Điểm quan trọng: topology được bảo vệ bằng provider/profile contract, role-aware Paseo MCP proxy, OpenCode permission, CLI wrapper và Lead lease registry. Codex lifecycle hooks chỉ còn là defense-in-depth vì `app-server` có specialized tool paths không phát hook. Đây là deterministic workflow isolation, không phải cryptographic isolation khỏi một process hostile có quyền đọc filesystem/process.
 
@@ -62,8 +62,10 @@ Supervisor <redacted-agent>
 | `claude-supervisor` | custom Human-facing Supervisor thử nghiệm, dùng Opus 4.8 Medium/High/Max |
 | `codex-supervisor` | custom Supervisor, GPT-6 Sol XHigh |
 | `codex-lead` | custom Lead, GPT-6 Sol XHigh |
-| `claude-lead` | custom Lead, Opus 5.5 High với auto-compact window 300K |
-| `codex-peer` | custom bounded Codex Peer, dùng Sol/Luna |
+| `claude-lead` | custom Lead, Opus 5.5 XHigh với auto-compact window 300K |
+| `codex-peer` | custom bounded Codex Peer, GPT-6 Luna Medium |
+| `claude-reviewer` | custom read-only Reviewer, Opus 5.5 High |
+| `claude-watcher` | custom independent Watcher, Sonnet 5 Medium |
 | `opencode-peer` | custom OpenCode ACP Peer, AI Box DeepSeek/GLM |
 | `gemini-ui` | custom ACP provider qua antigravity-acp, model catalog giới hạn về Gemini |
 | `claude` | built-in Claude đang enabled cho direct/manual use; không phải internal role route |

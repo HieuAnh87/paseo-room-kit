@@ -73,6 +73,18 @@
       "destination": "config/claude/lead.settings.json.tmpl"
     },
     {
+      "source": "config/claude/peer.instructions.md.tmpl",
+      "destination": "config/claude/peer.instructions.md.tmpl"
+    },
+    {
+      "source": "config/claude/peer.mcp.json.tmpl",
+      "destination": "config/claude/peer.mcp.json.tmpl"
+    },
+    {
+      "source": "config/claude/peer.settings.json.tmpl",
+      "destination": "config/claude/peer.settings.json.tmpl"
+    },
+    {
       "source": "config/claude/supervisor.instructions.md.tmpl",
       "destination": "config/claude/supervisor.instructions.md.tmpl"
     },
@@ -83,6 +95,18 @@
     {
       "source": "config/claude/supervisor.settings.json.tmpl",
       "destination": "config/claude/supervisor.settings.json.tmpl"
+    },
+    {
+      "source": "config/claude/watcher.instructions.md.tmpl",
+      "destination": "config/claude/watcher.instructions.md.tmpl"
+    },
+    {
+      "source": "config/claude/watcher.mcp.json.tmpl",
+      "destination": "config/claude/watcher.mcp.json.tmpl"
+    },
+    {
+      "source": "config/claude/watcher.settings.json.tmpl",
+      "destination": "config/claude/watcher.settings.json.tmpl"
     },
     {
       "source": "config/codex/lead.config.toml.tmpl",

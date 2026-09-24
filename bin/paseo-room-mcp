@@ -94,8 +94,9 @@ ANSWER_ROOM_ASK_TOOL = workflow_tool(
      "expectedRevision": {"type": "integer", "minimum": 1}},
     ["leadAgentId", "askId", "answer", "expectedWorkEpoch", "expectedRevision"])
 LIST_ROOM_ATTENTION_TOOL = workflow_tool(
-    "list_room_attention", "Lead or bound Supervisor: read current-epoch questions and their reminder/escalation signals without sending messages.",
+    "list_room_attention", "Lead, bound Supervisor, or read-only Watcher: inspect current-epoch questions and reminder/escalation signals without sending messages.",
     {"leadAgentId": {"type": "string", "minLength": 1}}, ["leadAgentId"])
+LIST_ROOM_ATTENTION_TOOL["annotations"] = {"readOnlyHint": True}
 INSPECT_PEER_ATTENTION_TOOL = workflow_tool(
     "inspect_peer_attention", "Lead-only: inspect current owned Peers for a possible ended turn without handback. Signals are diagnostic and never complete an assignment.",
     {}, [])
@@ -901,7 +902,7 @@ def _attention_authority(
         or (role == "lead" and actor_id != lead_id)
         or (role == "human" and actor_id != "human")
         or (role in {"supervisor", "human"} and not workflow.governs(lease, actor_id, role))
-        or role not in {"lead", "supervisor", "human"}
+        or role not in {"lead", "supervisor", "human", "watcher"}
     ):
         return None
     if role == "supervisor":
@@ -912,6 +913,14 @@ def _attention_authority(
             or supervisor.get("archivedAt") is not None
             or not isinstance(labels, dict)
             or labels.get("role") != "supervisor"
+        ):
+            return None
+    if role == "watcher":
+        watcher = load_agent_record(actor_id)
+        if (
+            not isinstance(watcher, dict)
+            or watcher.get("archivedAt") is not None
+            or not watcher_provider(watcher)
         ):
             return None
     workflow.verify_context(lease, lead, pin=False)
@@ -1000,8 +1009,8 @@ def answer_room_ask(
 def list_room_attention(
     agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]
 ) -> dict[str, Any]:
-    if role not in {"lead", "supervisor", "human"}:
-        return denied_tool_result(request_id, "only room Lead or governance may inspect attention")
+    if role not in {"lead", "supervisor", "human", "watcher"}:
+        return denied_tool_result(request_id, "only room Lead, governance, or Watcher may inspect attention")
     if set(arguments) != {"leadAgentId"} or not isinstance(arguments.get("leadAgentId"), str):
         return error_response(request_id, -32602, "attention list requires leadAgentId")
     with read_locked_leases() as registry:
@@ -1239,6 +1248,8 @@ def unscoped_arguments(
 def allowed_tool(role: str, name: str) -> bool:
     if role == "peer":
         return False
+    if role == "watcher":
+        return name in {"list_agents", "list_workspaces"}
     if name in SCHEDULE_MUTATION_TOOLS:
         return False
     if role == "supervisor":
@@ -1249,6 +1260,13 @@ def allowed_tool(role: str, name: str) -> bool:
     if role == "lead" and name in LEAD_BLOCKED_TOOLS:
         return False
     return True
+
+
+def watcher_provider(record: dict[str, Any]) -> bool:
+    provider = record.get("provider")
+    return isinstance(provider, str) and (
+        provider == "claude-watcher" or provider.startswith("claude-watcher/")
+    )
 
 
 def run_guard(
@@ -1297,6 +1315,10 @@ def run_guard(
 
 
 def list_tools(agent_id: str, role: str, request_id: Any) -> dict[str, Any]:
+    if role == "watcher":
+        watcher = load_agent_record(agent_id)
+        if not isinstance(watcher, dict) or not watcher_provider(watcher):
+            return denied_tool_result(request_id, "watcher provider identity required")
     response = upstream_call(
         agent_id,
         {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": {}},
@@ -1349,6 +1371,8 @@ def list_tools(agent_id: str, role: str, request_id: Any) -> dict[str, Any]:
                 LIST_ROOM_ATTENTION_TOOL,
             )
         )
+    if role == "watcher":
+        filtered.append(LIST_ROOM_ATTENTION_TOOL)
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -2814,6 +2838,12 @@ def call_tool(
     arguments = params.get("arguments", {})
     if not isinstance(name, str) or not isinstance(arguments, dict):
         return error_response(request_id, -32602, "tools/call requires name and object arguments")
+    if role == "watcher":
+        watcher = load_agent_record(agent_id)
+        if not isinstance(watcher, dict) or not watcher_provider(watcher):
+            return denied_tool_result(request_id, "watcher provider identity required")
+        if name not in {"list_agents", "list_workspaces", LIST_ROOM_ATTENTION_TOOL["name"]}:
+            return denied_tool_result(request_id, "Watcher may use read-only room inspection tools only")
     if role == "lead":
         with locked_leases() as registry:
             lease = lead_lease(registry, agent_id)
@@ -2944,8 +2974,8 @@ def handle(agent_id: str, role: str, request: dict[str, Any]) -> dict[str, Any] 
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in {"supervisor", "lead", "peer"}:
-        fail("usage: paseo-room-mcp supervisor|lead|peer")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"supervisor", "lead", "peer", "watcher"}:
+        fail("usage: paseo-room-mcp supervisor|lead|peer|watcher")
     role = sys.argv[1]
     agent_id = resolve_agent_id()
     while True:

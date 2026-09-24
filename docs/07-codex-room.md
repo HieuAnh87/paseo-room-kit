@@ -90,18 +90,18 @@ Runtime config trỏ `model_catalog_json` vào catalog này. Mục tiêu là đ�
 ### Supervisor
 
 - Human-facing front door.
-- Sol Medium/High hoặc Luna Max.
+- GPT-6 Sol XHigh.
 - Governance/portfolio/lifecycle, không engineering acceptance.
 
 ### Lead
 
 - Engineering owner.
-- Sol hoặc Luna Max.
+- GPT-6 Sol XHigh; Claude Opus 5.5 XHigh là Lead route khác do Supervisor chọn.
 - Được tạo bounded Peer theo routing preference.
 
 ### Peer
 
-- Bounded worker/reviewer.
+- Bounded GPT-6 Luna Medium worker. Review độc lập dùng Claude Opus 5.5 High qua provider riêng.
 - Không dispatch; không được cấp Paseo MCP và direct CLI bị wrapper/permission deny.
 - Không biết/điều khiển governance channel.
 

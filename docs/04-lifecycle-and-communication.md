@@ -8,7 +8,7 @@
 ```text
 1. Human gửi objective cho Supervisor
 2. Supervisor xác định workspace và ownership hiện tại
-3. Nếu chưa có Lead khỏe, Supervisor tự chọn Codex Sol XHigh hoặc Claude Opus 5.5 High cho objective; Human có thể chỉ định
+3. Nếu chưa có Lead khỏe, Supervisor tự chọn Codex Sol XHigh hoặc Claude Opus 5.5 XHigh cho objective; Human có thể chỉ định
 4. Supervisor relay objective + accepted decisions + constraints + reporting contract
 5. Lead phân rã engineering và quyết định có cần Peer hay không
 6. Lead tạo bounded Peer theo category/model phù hợp

@@ -16,6 +16,8 @@ paseo-room-workflow answer-ask REQUEST.json --apply
 
 `REQUEST.json` chứa `leadAgentId`, `askId`, `answer`, `expectedWorkEpoch` và `expectedRevision` lấy từ danh sách mới nhất. CLI preview mặc định. Mốc nhắc sau 30 phút và chuyển cấp sau 2 giờ chỉ hiện trong view; chúng không tự gửi prompt, trả lời hoặc đổi quyền. `inspect_peer_attention` đọc status/activity để báo khả năng thiếu handback, terminal không có handback, hoặc permission đang chờ. Đây là nghi vấn để Lead kiểm tra, không phải quyết định kết quả.
 
+Watcher độc lập chạy Sonnet 5 Medium theo lịch mỗi 60 phút. Nó chỉ đọc danh sách agent/workspace và attention của managed rooms qua role-scoped proxy, rồi ghi báo cáo trong scheduled agent run. Unattended mode tránh kẹt ở prompt đọc MCP; settings deny các built-in tools và proxy lọc exact read-only tools. Nó không có quyền trả lời câu hỏi, điều phối agent, chấp nhận kết quả hoặc đổi lease. Trạng thái schedule và lần chạy gần nhất xem bằng `paseo schedule ls` và `paseo schedule logs`.
+
 ## Flow/Health
 
 Plugin trong [`plugin/`](../plugin/) tương thích Paseo 0.9.0–0.9.x và hiển thị dữ liệu read-only từ Paseo và lease hiện có: room, Lead/Peer, decision, câu hỏi và tín hiệu attention. Nó không tạo lane ledger và không thực hiện các operation được bảo vệ. Plugin được cài riêng, không nằm trong installer của kit; xem README trong thư mục plugin cho yêu cầu và lệnh cài. Kit pin CLI/daemon Paseo 0.9.1; plugin vẫn là thành phần tùy chọn.

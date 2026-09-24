@@ -19,6 +19,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 LEAD = "lead-one"
 SUPERVISOR = "supervisor-one"
 PEER = "peer-one"
+WATCHER = "watcher-one"
 WORKSPACE = "workspace-one"
 
 
@@ -65,6 +66,8 @@ class AttentionTest(unittest.TestCase):
              "labels": {"role": "peer", "room_kind": "managed_slp", "work_epoch": "1",
                         "task_state": "ASSIGNED", "assignment_id": "assignment-one",
                         "paseo.parent-agent-id": LEAD}, "archivedAt": None},
+            {"id": WATCHER, "workspaceId": "watcher-control", "provider": "claude-watcher",
+             "labels": {"role": "watcher"}, "archivedAt": None},
         ]
         for record in records:
             (self.proxy.AGENTS_ROOT / "records" / f"{record['id']}.json").write_text(json.dumps(record))
@@ -168,6 +171,29 @@ class AttentionTest(unittest.TestCase):
         self.assertEqual(data["asks"][0]["attention"], "ESCALATE")
         self.assertEqual(data["asks"][0]["escalate_to"], "human")
         self.assertEqual(self.proxy.LEASES_PATH.read_bytes(), before)
+
+    def test_watcher_reads_attention_without_governance_authority(self):
+        self.result(self.open())
+        before = self.proxy.LEASES_PATH.read_bytes()
+        data = self.result(self.proxy.list_room_attention(
+            WATCHER, "watcher", 1, {"leadAgentId": LEAD}))
+        self.assertEqual(len(data["asks"]), 1)
+        self.assertEqual(self.proxy.LEASES_PATH.read_bytes(), before)
+        denied = self.proxy.call_tool(WATCHER, "watcher", 2, {
+            "name": "archive_agent", "arguments": {"agentId": LEAD}})
+        self.assertTrue(denied["result"]["isError"])
+        self.assertTrue(self.proxy.list_room_attention(
+            SUPERVISOR, "watcher", 3, {"leadAgentId": LEAD})["result"]["isError"])
+        self.assertTrue(self.proxy.call_tool(SUPERVISOR, "watcher", 4, {
+            "name": "list_agents", "arguments": {}})["result"]["isError"])
+
+    def test_watcher_tool_catalog_is_read_only(self):
+        self.proxy.upstream_call = lambda *_args, **_kwargs: {
+            "result": {"tools": [{"name": name} for name in (
+                "list_agents", "list_workspaces", "archive_agent", "send_agent_prompt")]}}
+        catalog = self.proxy.list_tools(WATCHER, "watcher", 1)
+        names = {tool["name"] for tool in catalog["result"]["tools"]}
+        self.assertEqual(names, {"list_agents", "list_workspaces", "list_room_attention"})
 
     def test_reminder_threshold_and_old_epoch_has_no_current_signal(self):
         self.result(self.open())

@@ -27,12 +27,12 @@ class RoomRoleGuardTest(unittest.TestCase):
                         "planning": "codex-lead/gpt-6-sol",
                         "planning_claude": "claude-lead/claude-opus-5-5",
                         "planning_budget": "opencode-lead/aibox/glm-5.2",
-                        "impl": "opencode-peer/aibox/deepseek-v4-flash",
-                        "impl_deep": "codex-peer/gpt-5.6-luna",
-                        "search": "codex-peer/gpt-5.6-luna",
+                        "impl": "codex-peer/gpt-6-luna",
+                        "impl_deep": "codex-peer/gpt-6-luna",
+                        "search": "codex-peer/gpt-6-luna",
                         "ui": "gemini-ui/gemini-3.6-flash-medium",
                         "research": "opencode-peer/aibox/deepseek-v4-flash",
-                        "audit": "codex-peer/gpt-5.6-luna",
+                        "audit": "claude-reviewer/claude-opus-5-5",
                         "impl_budget": "opencode-peer/aibox/deepseek-v4-flash",
                         "impl_deep_budget": "opencode-peer/aibox/deepseek-v4-flash",
                         "search_budget": "opencode-peer/aibox/deepseek-v4-flash",
@@ -202,7 +202,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["lead_profile"], "claude")
         self.assertEqual(updated["labels"]["stack_profile"], "standard")
         self.assertEqual(updated["settings"]["modeId"], "bypassPermissions")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "high")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "xhigh")
         lease = json.loads(self.leases.read_text())["leases"]["workspace-claude"]
         self.assertEqual(lease["provider"], "claude-lead/claude-opus-5-5")
 
@@ -239,6 +239,12 @@ class RoomRoleGuardTest(unittest.TestCase):
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
         self.assertNotIn("workspace-old-pilot", json.loads(self.leases.read_text())["leases"])
+
+    def test_watcher_denies_bash_commands(self) -> None:
+        result = self.run_guard(
+            "watcher", self.pre("Bash", {"command": "pwd"}), self.supervisor_id
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_budget_supervisor_rewrites_glm_lead_contract(self) -> None:
         self.write_agent(
@@ -318,7 +324,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-peer/gpt-5.6-luna",
+                    "provider": "codex-peer/gpt-6-luna",
                     "title": "Search",
                     "initialPrompt": "Find the call path.",
                     "labels": {"route": "search"},
@@ -332,7 +338,37 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["task_state"], "ASSIGNED")
         self.assertEqual(updated["labels"]["room_kind"], "managed_slp")
         self.assertEqual(updated["labels"]["work_epoch"], "1")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "low")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "medium")
+
+    def test_lead_creates_read_only_claude_reviewer(self) -> None:
+        result = self.run_guard(
+            "lead",
+            self.pre("mcp__paseo__create_agent", {
+                "provider": "claude-reviewer/claude-opus-5-5",
+                "title": "Review candidate",
+                "initialPrompt": "Review candidate digest.",
+                "labels": {"route": "audit"},
+            }),
+            self.lead_id,
+        )
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["labels"]["disposition"], "reviewer")
+        self.assertEqual(updated["labels"]["write_mode"], "read_only")
+        self.assertEqual(updated["settings"]["modeId"], "plan")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "high")
+
+    def test_audit_route_rejects_engineer_disposition(self) -> None:
+        result = self.run_guard(
+            "lead",
+            self.pre("mcp__paseo__create_agent", {
+                "provider": "claude-reviewer/claude-opus-5-5",
+                "title": "Review candidate",
+                "initialPrompt": "Review candidate digest.",
+                "labels": {"route": "audit", "disposition": "engineer"},
+            }),
+            self.lead_id,
+        )
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_lead_rejects_wrong_route_provider(self) -> None:
         result = self.run_guard(
@@ -1114,11 +1150,11 @@ const r=await tools.mcp__paseo__create_agent({
     def test_supervisor_nested_exec_accepts_claude_contract(self) -> None:
         source = """
 const r=await tools.mcp__paseo__create_agent({
-  workspaceId:"workspace-claude",
+  workspaceId:"workspace-new",
   provider:"claude-lead/claude-opus-5-5",
   notifyOnFinish:false,
   labels:{role:"lead",route:"planning",lead_profile:"claude",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
-  settings:{modeId:"bypassPermissions",thinkingOptionId:"high"},
+  settings:{modeId:"bypassPermissions",thinkingOptionId:"xhigh"},
   initialPrompt:`Own the objective.`
 });text(r)
 """
@@ -1128,16 +1164,16 @@ const r=await tools.mcp__paseo__create_agent({
             self.supervisor_id,
         )
         self.assertIsNone(result)
-        lease = json.loads(self.leases.read_text())["leases"]["workspace-claude"]
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
         self.assertEqual(lease["provider"], "claude-lead/claude-opus-5-5")
 
     def test_lead_nested_exec_requires_full_static_route_contract(self) -> None:
         missing_mode = """
 const r=await tools.mcp__paseo__create_agent({
-  provider:"codex-peer/gpt-5.6-luna",
+  provider:"codex-peer/gpt-6-luna",
   notifyOnFinish:true,
   labels:{role:"peer",route:"search",task_state:"ASSIGNED",room_kind:"managed_slp",work_epoch:"1"},
-  settings:{thinkingOptionId:"low"},
+  settings:{thinkingOptionId:"medium"},
   initialPrompt:`Search only.`
 });text(r)
 """
@@ -1149,8 +1185,8 @@ const r=await tools.mcp__paseo__create_agent({
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
 
         valid = missing_mode.replace(
-            'settings:{thinkingOptionId:"low"}',
-            'settings:{modeId:"full-access",thinkingOptionId:"low"}',
+            'settings:{thinkingOptionId:"medium"}',
+            'settings:{modeId:"full-access",thinkingOptionId:"medium"}',
         )
         allowed = self.run_guard(
             "lead",
@@ -1158,6 +1194,21 @@ const r=await tools.mcp__paseo__create_agent({
             self.lead_id,
         )
         self.assertIsNone(allowed)
+
+    def test_nested_audit_requires_read_only_reviewer(self) -> None:
+        source = """
+const r=await tools.mcp__paseo__create_agent({
+  provider:"claude-reviewer/claude-opus-5-5",
+  notifyOnFinish:true,
+  labels:{role:"peer",route:"audit",task_state:"ASSIGNED",room_kind:"managed_slp",work_epoch:"1"},
+  settings:{modeId:"plan",thinkingOptionId:"high"},
+  initialPrompt:`Review candidate.`
+});text(r)
+"""
+        denied = self.run_guard("lead", self.pre("exec", {"input": source}), self.lead_id)
+        self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+        valid = source.replace('route:"audit",', 'route:"audit",disposition:"reviewer",write_mode:"read_only",')
+        self.assertIsNone(self.run_guard("lead", self.pre("exec", {"input": valid}), self.lead_id))
 
     def test_post_nested_exec_activates_lead_lease(self) -> None:
         source = """

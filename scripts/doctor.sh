@@ -143,6 +143,8 @@ required = {
     "codex-supervisor",
     "codex-lead",
     "claude-lead",
+    "claude-reviewer",
+    "claude-watcher",
     "codex-peer",
     "opencode-peer",
     "opencode-supervisor",
@@ -296,6 +298,14 @@ if [[ "$mode" == "--live" ]]; then
         "${repo_root}/config/opencode/paseo-${role}.${asset}.tmpl" \
         "${target_home}/.config/opencode/paseo-${role}.${asset}" \
         "installed OpenCode ${role} ${asset}"
+    done
+  done
+  for role in peer watcher; do
+    for asset in instructions.md settings.json mcp.json; do
+      check_installed_render \
+        "${repo_root}/config/claude/${role}.${asset}.tmpl" \
+        "${target_home}/.config/claude-room/${role}/${asset}" \
+        "installed Claude ${role} ${asset}"
     done
   done
   for role in supervisor lead; do

@@ -164,6 +164,8 @@ class InstallTest(unittest.TestCase):
             "codex-supervisor",
             "codex-lead",
             "claude-lead",
+            "claude-reviewer",
+            "claude-watcher",
             "codex-peer",
             "opencode-peer",
             "opencode-supervisor",

@@ -74,6 +74,12 @@ class DoctorTest(unittest.TestCase):
                     ROOT / f"config/opencode/paseo-{role}.{asset}.tmpl",
                     self.home / f".config/opencode/paseo-{role}.{asset}",
                 )
+        for role in ("peer", "watcher"):
+            for asset in ("instructions.md", "settings.json", "mcp.json"):
+                self._render(
+                    ROOT / f"config/claude/{role}.{asset}.tmpl",
+                    self.home / f".config/claude-room/{role}/{asset}",
+                )
         (self.home / ".zshrc").write_text("# unchanged\n", encoding="utf-8")
 
         self._write_executable(

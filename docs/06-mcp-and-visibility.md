@@ -70,4 +70,4 @@ Chi tiết command/env thật chỉ đọc từ config local có kiểm soát. [
 
 ## Vì sao codebase search không nhất thiết spawn model?
 
-`rg`, GitNexus hoặc MCP call là tool execution trong agent hiện tại. Chỉ khi Lead tạo một delegated `search` Peer thì Luna Low mới là model riêng. Đây là lý do routing docs tách “direct search” và “delegated search”.
+`rg`, GitNexus hoặc MCP call là tool execution trong agent hiện tại. Chỉ khi Lead tạo một delegated `search` Peer thì GPT-6 Luna Medium mới là model riêng. Đây là lý do routing docs tách “direct search” và “delegated search”.

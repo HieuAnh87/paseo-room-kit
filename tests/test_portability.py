@@ -72,6 +72,8 @@ class PortabilityTest(unittest.TestCase):
             "codex-supervisor",
             "codex-lead",
             "claude-lead",
+            "claude-reviewer",
+            "claude-watcher",
             "codex-peer",
             "opencode-peer",
             "opencode-supervisor",
@@ -105,9 +107,18 @@ class PortabilityTest(unittest.TestCase):
         )
         self.assertEqual(
             claude_lead["models"][0]["thinkingOptions"][0]["id"],
-            "high",
+            "xhigh",
         )
         self.assertIn("Agent", claude_lead["disallowedTools"])
+
+        reviewer = value["agents"]["providers"]["claude-reviewer"]
+        self.assertEqual(reviewer["models"][0]["id"], "claude-opus-5-5")
+        self.assertEqual(reviewer["models"][0]["thinkingOptions"][0]["id"], "high")
+        watcher = value["agents"]["providers"]["claude-watcher"]
+        self.assertEqual(watcher["models"][0]["id"], "claude-sonnet-5")
+        self.assertEqual(watcher["models"][0]["thinkingOptions"][0]["id"], "medium")
+        peer = value["agents"]["providers"]["codex-peer"]
+        self.assertEqual([item["id"] for item in peer["models"]], ["gpt-6-luna"])
 
         opencode_supervisor = value["agents"]["providers"]["opencode-supervisor"]
         self.assertEqual(opencode_supervisor["extends"], "acp")

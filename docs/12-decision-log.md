@@ -168,3 +168,20 @@ xử lý follow-up của chính objective đó qua work epoch. Objective độc 
 workspace/worktree riêng; nếu write scope hoặc contracts chồng nhau, Supervisor
 xếp tuần tự. Guard bảo vệ một Lead mỗi workspace; kiểm tra chồng phạm vi giữa
 các workspace vẫn là quy tắc workflow, chưa được enforcement bằng máy.
+
+## D22 — Claude Opus Lead dùng XHigh
+
+Opus 5.5 hỗ trợ XHigh trong Claude Code/Paseo. Cấu hình High ở D21 thấp hơn
+mức Human mong muốn; Lead Claude nay pin XHigh. Guard, catalog, Supervisor
+instructions và kiểm tra route dùng cùng mức này.
+
+## D23 — Peer, Reviewer và Watcher chuẩn
+
+Standard Peer cho `impl`, `impl_deep`, `search` dùng GPT-6 Luna Medium. Review
+`audit` dùng Claude Opus 5.5 High trong Plan Mode, chỉ nhận disposition
+`reviewer` và scope read-only. Budget stack giữ DeepSeek Max theo các route
+`*_budget`.
+
+Watcher độc lập dùng Claude Sonnet 5 Medium. User chọn lịch 60 phút một lần
+để quét tất cả managed rooms và báo tín hiệu quan sát được. Role proxy chỉ mở
+read tools và attention; Watcher không có quyền governance hay engineering.

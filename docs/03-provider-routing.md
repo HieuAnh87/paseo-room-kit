@@ -7,12 +7,12 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 | Category | Provider/model | Thinking | Dùng cho |
 |---|---|---|---|
 | `planning` | `codex-lead/gpt-6-sol` | XHigh | Codex Lead cho objective mới |
-| `planning_claude` | `claude-lead/claude-opus-5-5` | High | Claude Lead cho objective mới |
+| `planning_claude` | `claude-lead/claude-opus-5-5` | XHigh | Claude Lead cho objective mới |
 | `planning_budget` | `opencode-lead/aibox/glm-5.2` | Max | chỉ từ DeepSeek budget Supervisor |
-| `impl` | `opencode-peer/aibox/deepseek-v4-flash` | Max | implementation bình thường, cơ khí, isolated |
-| `impl_deep` | `codex-peer/gpt-5.6-luna` | Max | implementation khó, cross-cutting, nhiều uncertainty |
-| `search` | `codex-peer/gpt-5.6-luna` | Low | delegated codebase navigation/search |
-| `audit` | `codex-peer/gpt-5.6-luna` | Max | review/audit |
+| `impl` | `codex-peer/gpt-6-luna` | Medium | bounded implementation |
+| `impl_deep` | `codex-peer/gpt-6-luna` | Medium | bounded implementation khó |
+| `search` | `codex-peer/gpt-6-luna` | Medium | delegated codebase navigation/search |
+| `audit` | `claude-reviewer/claude-opus-5-5` | High | review độc lập, read-only |
 | `research` | `opencode-peer/aibox/deepseek-v4-flash` | Max | research/background scan |
 | `ui` | `gemini-ui/gemini-3.6-flash-medium` | model suffix | UI/design work |
 
@@ -53,7 +53,7 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 
 ### `claude-lead`
 
-- Opus 5.5 1M: High, là model duy nhất của provider.
+- Opus 5.5 1M: XHigh, là model duy nhất của provider.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`: 1M là capacity ceiling, active window được compact sớm.
 - Được Supervisor chọn bằng `planning_claude` khi mở objective mới; Human có thể chỉ định Codex hoặc Claude.
 - Dùng `claude-room lead`, role-aware Paseo MCP và cùng Lead lease/handback contract; Claude native Agent/Task bị deny.
@@ -66,9 +66,13 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 
 ### `codex-peer`
 
-- Sol: Low, Medium, High, XHigh, Max, Ultra.
-- Luna: Low, Medium, High, XHigh, Max.
-- Search dùng Luna Low; deep implementation/audit dùng Luna Max.
+- GPT-6 Luna Medium là model/effort duy nhất của Peer chuẩn.
+- `impl`, `impl_deep` và delegated `search` dùng cùng profile bounded này.
+
+### `claude-reviewer` và `claude-watcher`
+
+- Reviewer: Opus 5.5 High, Plan Mode, route `audit` với `disposition=reviewer` và `write_mode=read_only`.
+- Watcher: Sonnet 5 Medium, unattended mode với built-in mutation/read tools bị deny; proxy chỉ mở các Paseo read tools. Schedule độc lập quét managed rooms mỗi 60 phút.
 
 ### `opencode-peer`
 
@@ -97,20 +101,20 @@ Lead/Supervisor tự gọi `rg`, GitNexus hoặc MCP search thì không có mode
 Lead tạo một Peer cho việc navigation/search thì dùng:
 
 ```text
-provider = codex-peer/gpt-5.6-luna
-thinkingOptionId = low
+provider = codex-peer/gpt-6-luna
+thinkingOptionId = medium
 ```
 
-Không dùng “no thinking” vì catalog hiện tại chỉ khai báo Low trở lên cho Luna. Low là lựa chọn rẻ/nhẹ nhất đã được provider contract xác nhận.
+Delegated search dùng cùng GPT-6 Luna Medium profile đã chốt cho Peer.
 
 ## Implementation split
 
-DeepSeek không thay Luna hoàn toàn. Hai route có mục đích khác nhau:
+Standard và budget stack có route khác nhau:
 
 ```text
-mechanical/isolated implementation → DeepSeek Flash Max
-hard/cross-cutting implementation  → Luna Max
-review/audit                       → Luna Max
+standard implementation/search → GPT-6 Luna Medium
+standard review                → Claude Opus 5.5 High
+budget non-UI Peer             → DeepSeek Flash Max
 ```
 
 DeepSeek/GLM trên AI Box hiện chỉ khai báo Max; không tự thêm `none`/`low` vào catalog nếu provider chưa hỗ trợ.
@@ -119,7 +123,7 @@ DeepSeek/GLM trên AI Box hiện chỉ khai báo Max; không tự thêm `none`/`
 
 Lead phải inspect agent ngay sau `create_agent`:
 
-1. provider phải khớp role route (`codex-peer/`, `opencode-peer/`, `gemini-ui/`);
+1. provider phải khớp role route (`codex-peer/`, `claude-reviewer/`, `opencode-peer/`, `gemini-ui/`);
 2. model phải khớp model đã chọn;
 3. thinking phải khớp assignment;
 4. nếu rơi về stock `codex/` hoặc sai provider thì dừng chain, không gửi work tiếp.
