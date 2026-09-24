@@ -62,8 +62,8 @@ daemon only after reviewing the rendered config, confirming there is no active
 agent work, and explicitly choosing to do so.
 
 After the restart, `claude-supervisor/claude-opus-4-8` is available as a
-parallel Human-facing front door. Stable Lead routing remains
-`codex-lead/gpt-5.6-sol`. An owner-explicit pilot can instead use
+parallel Human-facing front door. Codex Supervisor and stable Lead use
+`gpt-6-sol` at XHigh (`codex-supervisor` and `codex-lead`). An owner-explicit pilot can instead use
 `claude-lead/claude-sonnet-5[1m]` at High with a 300K auto-compact window;
 selecting Claude for the Supervisor still does not transfer engineering
 ownership into the Supervisor.

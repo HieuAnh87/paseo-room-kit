@@ -600,6 +600,7 @@ def resolve_lead_route(
 def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("codex-lead/"):
         settings["modeId"] = "full-access"
+        settings["thinkingOptionId"] = "xhigh"
         return
     if provider.startswith("claude-lead/"):
         settings["modeId"] = "bypassPermissions"
@@ -616,6 +617,8 @@ def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("codex-lead/"):
         if settings.get("modeId") != "full-access":
             deny("Codex Lead creation requires settings.modeId: full-access.")
+        if settings.get("thinkingOptionId") != "xhigh":
+            deny("Codex Lead creation requires thinkingOptionId: xhigh.")
         return
     if provider.startswith("claude-lead/"):
         if settings.get("modeId") != "bypassPermissions":

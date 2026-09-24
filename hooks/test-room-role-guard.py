@@ -24,7 +24,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             json.dumps(
                 {
                     "providers": {
-                        "planning": "codex-lead/gpt-5.6-sol",
+                        "planning": "codex-lead/gpt-6-sol",
                         "planning_pilot": "claude-lead/claude-sonnet-5[1m]",
                         "planning_budget": "opencode-lead/aibox/glm-5.2",
                         "impl": "opencode-peer/aibox/deepseek-v4-flash",
@@ -159,7 +159,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-new",
                     "title": "Lead",
                     "initialPrompt": "Own the objective.",
@@ -174,6 +174,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(output["updatedInput"]["labels"]["lead_profile"], "stable")
         self.assertEqual(output["updatedInput"]["labels"]["stack_profile"], "standard")
         self.assertFalse(output["updatedInput"]["notifyOnFinish"])
+        self.assertEqual(output["updatedInput"]["settings"]["thinkingOptionId"], "xhigh")
         self.assertEqual(output["updatedInput"]["labels"]["room_kind"], "managed_slp")
         self.assertEqual(output["updatedInput"]["labels"]["work_epoch"], "1")
         lease = json.loads(self.leases.read_text())["leases"]["workspace-new"]
@@ -266,7 +267,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "paseo_create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-new",
                     "title": "Lead",
                     "initialPrompt": "Own the objective.",
@@ -466,7 +467,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-new",
                     "title": "Lead",
                     "initialPrompt": "Own the objective.",
@@ -686,7 +687,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-new",
                     "title": "Replacement",
                     "initialPrompt": "Own the objective.",
@@ -723,7 +724,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-project",
                     "title": "Must not duplicate",
                     "initialPrompt": "Own the objective.",
@@ -741,7 +742,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-project",
                     "title": "Must detect live owner",
                     "initialPrompt": "Own the objective.",
@@ -768,7 +769,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-project",
                     "title": "Replacement must wait",
                     "initialPrompt": "Own the objective.",
@@ -812,7 +813,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             self.pre(
                 "mcp__paseo__create_agent",
                 {
-                    "provider": "codex-lead/gpt-5.6-sol",
+                    "provider": "codex-lead/gpt-6-sol",
                     "workspaceId": "workspace-new",
                     "title": "New room",
                     "initialPrompt": "Own the objective.",
@@ -1076,10 +1077,10 @@ const r=await tools.mcp__paseo__create_agent({
         source = """
 const r=await tools.mcp__paseo__create_agent({
   workspaceId:"workspace-new",
-  provider:"codex-lead/gpt-5.6-sol",
+  provider:"codex-lead/gpt-6-sol",
   notifyOnFinish:false,
   labels:{role:"lead",route:"planning",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
-  settings:{modeId:"full-access"},
+  settings:{modeId:"full-access",thinkingOptionId:"xhigh"},
   initialPrompt:`Own the objective.`
 });text(r)
 """
@@ -1144,10 +1145,10 @@ const r=await tools.mcp__paseo__create_agent({
         source = """
 const r=await tools.mcp__paseo__create_agent({
   workspaceId:"workspace-new",
-  provider:"codex-lead/gpt-5.6-sol",
+  provider:"codex-lead/gpt-6-sol",
   notifyOnFinish:false,
   labels:{role:"lead",route:"planning",task_state:"LEASED",room_kind:"managed_slp",work_epoch:"1"},
-  settings:{modeId:"full-access"},
+  settings:{modeId:"full-access",thinkingOptionId:"xhigh"},
   initialPrompt:`Own the objective.`
 });text(r)
 """

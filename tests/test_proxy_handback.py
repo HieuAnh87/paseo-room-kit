@@ -93,7 +93,7 @@ class ManagedLifecycleTest(unittest.TestCase):
             "workspace_id": WORKSPACE_ID,
             "lead_agent_id": LEAD_ID,
             "supervisor_agent_id": SUPERVISOR_ID,
-            "provider": "codex-lead/gpt-5.6-sol",
+            "provider": "codex-lead/gpt-6-sol",
             "work_epoch": 1,
             "handback_epoch": 0,
             "revision": 1,
