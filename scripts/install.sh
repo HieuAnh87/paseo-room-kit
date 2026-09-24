@@ -76,7 +76,8 @@ check_paseo_config_render() {
       "${repo_root}/config/paseo/config.json.tmpl" \
       "$rendered" --home "$target_home" \
       --preserve-json-from "$destination" \
-      --preserve-existing-json-key pluginsEnabled; then
+      --preserve-existing-json-key pluginsEnabled \
+      --preserve-existing-json-key plugins; then
     unlink "$rendered"
     return 1
   fi
@@ -105,7 +106,8 @@ install_file() {
       "$source" "$destination" --home "$target_home"
     )
     if [[ "$kind" == "render-paseo-config" ]]; then
-      render_args+=(--preserve-existing-json-key pluginsEnabled)
+      render_args+=(--preserve-existing-json-key pluginsEnabled
+                    --preserve-existing-json-key plugins)
     fi
     python3 "${repo_root}/scripts/render_template.py" "${render_args[@]}"
   else
@@ -165,7 +167,7 @@ check_paseo_config_render
 
 install_file "${repo_root}/config/paseo/config.json.tmpl" \
   "${target_home}/.paseo/config.json" 600 render-paseo-config
-printf 'PRESERVE host-only Paseo config key pluginsEnabled when present\n'
+printf 'PRESERVE host-only Paseo plugin settings when present\n'
 install_file "${repo_root}/config/paseo/orchestration-preferences.json" \
   "${target_home}/.paseo/orchestration-preferences.json" 644
 
@@ -195,6 +197,10 @@ for executable in claude-room codex-room codex-room-sync paseo-room-mcp paseo-ro
 done
 install_file "${repo_root}/bin/room_workflow.py" \
   "${target_home}/.local/bin/room_workflow.py" 644
+install_file "${repo_root}/bin/room_attention.py" \
+  "${target_home}/.local/bin/room_attention.py" 644
+install_file "${repo_root}/bin/room_land.py" \
+  "${target_home}/.local/bin/room_land.py" 644
 install_file "${repo_root}/bin/paseo-room-deny" \
   "${target_home}/.local/share/paseo-room-bin/paseo" 755
 

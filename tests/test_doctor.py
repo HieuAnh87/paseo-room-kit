@@ -47,6 +47,8 @@ class DoctorTest(unittest.TestCase):
             ("bin/paseo-room-mcp", ".local/bin/paseo-room-mcp"),
             ("bin/paseo-room-workflow", ".local/bin/paseo-room-workflow"),
             ("bin/room_workflow.py", ".local/bin/room_workflow.py"),
+            ("bin/room_attention.py", ".local/bin/room_attention.py"),
+            ("bin/room_land.py", ".local/bin/room_land.py"),
             ("hooks/room-role-guard.py", ".codex/hooks/room-role-guard.py"),
             ("hooks/test-room-role-guard.py", ".codex/hooks/test-room-role-guard.py"),
             (

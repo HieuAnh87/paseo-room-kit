@@ -27,7 +27,7 @@ SECRET_SHAPES = (
 
 
 def repository_text_files() -> list[pathlib.Path]:
-    excluded = {".git", ".serena", "__pycache__"}
+    excluded = {".git", ".serena", "__pycache__", "node_modules"}
     files = []
     for path in ROOT.rglob("*"):
         if not path.is_file() or any(part in excluded for part in path.parts):

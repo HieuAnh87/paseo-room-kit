@@ -221,12 +221,28 @@
       "destination": "bin/room_workflow.py"
     },
     {
+      "source": "bin/room_attention.py",
+      "destination": "bin/room_attention.py"
+    },
+    {
+      "source": "bin/room_land.py",
+      "destination": "bin/room_land.py"
+    },
+    {
       "source": "bin/paseo-room-workflow",
       "destination": "bin/paseo-room-workflow"
     },
     {
       "source": "tests/test_workflow.py",
       "destination": "tests/test_workflow.py"
+    },
+    {
+      "source": "tests/test_attention.py",
+      "destination": "tests/test_attention.py"
+    },
+    {
+      "source": "tests/test_land.py",
+      "destination": "tests/test_land.py"
     }
   ]
 }

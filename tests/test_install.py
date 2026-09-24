@@ -145,11 +145,11 @@ class InstallTest(unittest.TestCase):
         for name, original in originals.items():
             self.assertEqual(backup_files[name].read_text(encoding="utf-8"), original)
 
-    def test_force_apply_preserves_host_only_paseo_plugin_flag(self) -> None:
+    def test_force_apply_preserves_host_only_paseo_plugin_settings(self) -> None:
         paseo = self.home / ".paseo"
         paseo.mkdir()
         installed = paseo / "config.json"
-        original = b'{"pluginsEnabled":true}\n'
+        original = b'{"pluginsEnabled":true,"plugins":{"room-flow":{"source":"/tmp/room-flow"}}}\n'
         installed.write_bytes(original)
 
         result = self.run_install("--apply", force=True)
@@ -157,6 +157,7 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         rendered = json.loads(installed.read_text(encoding="utf-8"))
         self.assertIs(rendered["pluginsEnabled"], True)
+        self.assertEqual(rendered["plugins"], {"room-flow": {"source": "/tmp/room-flow"}})
         providers = rendered["agents"]["providers"]
         for provider_id in (
             "claude-supervisor",

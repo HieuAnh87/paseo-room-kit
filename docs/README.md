@@ -31,6 +31,7 @@ Bộ tài liệu này mô tả toàn bộ setup Paseo hiện tại trên máy `$
 | Guard, lease và terminal-state mới | [15-role-guard-and-lease.md](15-role-guard-and-lease.md) |
 | Context window và compaction cho Lead | [16-context-window-and-compaction-research.md](16-context-window-and-compaction-research.md) |
 | Workflow chung, direct Lead, candidate review và drift | [17-provider-independent-workflow.md](17-provider-independent-workflow.md) |
+| Attention, Flow/Health và Land tùy chọn | [18-attention-and-land.md](18-attention-and-land.md) |
 | Workspace/agent records hiện có | [references/runtime-inventory.md](references/runtime-inventory.md) |
 
 ## Source of truth

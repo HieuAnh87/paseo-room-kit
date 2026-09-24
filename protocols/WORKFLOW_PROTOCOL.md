@@ -161,6 +161,16 @@ retired or reconciled.
 
 Plugins and UI may visualize `list_slp_decisions` output or invoke these protected bounded operations. Every managed operation requires `room_kind=managed_slp`; an ad-hoc lease cannot be promoted implicitly. Plugins and UI must not infer or persist an independent lifecycle state machine.
 
+## Bounded attention
+
+`open_room_ask` records a Lead question for the bound Supervisor, or for Human in direct mode. A Peer `DEPENDENCY_REQUEST` report creates a Peer-to-Lead question when Lead records the report. Ask IDs are deduplicated against their sender, recipient, epoch and question; `answer_room_ask` requires the responsible recipient, current epoch and expected revision. The existing Lead lease carries bounded ask records. `list_room_attention` computes 30-minute reminder and two-hour escalation signals without sending a prompt or changing authority. The owner shell may list and answer Human-addressed asks through `paseo-room-workflow asks` and `answer-ask` (preview by default).
+
+`inspect_peer_attention` may signal a pending permission, a terminal Peer without handback, or a possible missing handback after an idle turn. These are read-only suspicions for Lead to inspect. They never set `DONE`, `ACCEPTED`, or a Human decision; `recover_peer_callbacks` remains the bounded evidence-recovery operation.
+
+## Optional local Git land
+
+Human `ACCEPTED` does not authorize an automatic merge. The owner-shell `land-prepare` creates a read-only plan for an already accepted, clean, fully committed candidate in a managed room with candidate proof. `land-apply` requires a separate exact plan-digest approval and `--apply`. Before fast-forwarding a local target branch it rechecks authority epoch/revision, candidate/review evidence, source and target commit IDs, clean worktrees, and idle room writers; any drift requires a new plan. The target branch may be checked out in an explicitly named clean worktree. The operation does not commit, push, run a test command, or override a red gate. Archive after land if the same active lease is needed for the check. Manual Git processes outside managed rooms are cooperative writers and must stay quiescent during land.
+
 ## Routing
 
 Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.

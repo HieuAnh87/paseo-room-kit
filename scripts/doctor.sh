@@ -202,6 +202,8 @@ esac
 python3 "${repo_root}/tests/test_portability.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_proxy_handback.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_workflow.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_attention.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_land.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_public_export.py" || failures=$((failures + 1))
 python3 -c 'import pathlib, sys; [compile(path.read_text(), str(path), "exec") for path in map(pathlib.Path, sys.argv[1:])]' \
   "${repo_root}/hooks/room-role-guard.py" \
@@ -210,6 +212,8 @@ python3 -c 'import pathlib, sys; [compile(path.read_text(), str(path), "exec") f
   "${repo_root}/bin/paseo-room-mcp" \
   "${repo_root}/bin/paseo-room-workflow" \
   "${repo_root}/bin/room_workflow.py" \
+  "${repo_root}/bin/room_attention.py" \
+  "${repo_root}/bin/room_land.py" \
   "${repo_root}/scripts/render_template.py" \
   "${repo_root}/scripts/manage_zshrc.py" \
   "${repo_root}/scripts/export_public_kit.py" \
@@ -258,7 +262,7 @@ if [[ "$mode" == "--live" ]]; then
     "${repo_root}/bin/paseo-room-mcp" \
     "${target_home}/.local/bin/paseo-room-mcp" \
     "installed role proxy"
-  for asset in paseo-room-workflow room_workflow.py; do
+  for asset in paseo-room-workflow room_workflow.py room_attention.py room_land.py; do
     check_installed_copy \
       "${repo_root}/bin/${asset}" \
       "${target_home}/.local/bin/${asset}" \

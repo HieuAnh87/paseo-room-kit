@@ -1,0 +1,5 @@
+{
+  "id": "room-flow",
+  "description": "Read-only Flow and Health view for Paseo room-kit managed rooms",
+  "requirements": { "paseo": ">=0.9.1 <0.10.0" }
+}

@@ -11,6 +11,7 @@ import pathlib
 import sys
 
 import room_workflow as workflow
+import room_land
 
 
 def proxy_module():
@@ -29,6 +30,14 @@ def main() -> int:
     init.add_argument("--apply", action="store_true")
     candidate = commands.add_parser("snapshot", help="read-only Git candidate identity")
     candidate.add_argument("repository", type=pathlib.Path)
+    land_prepare = commands.add_parser("land-prepare", help="preview fast-forward of an accepted, committed candidate")
+    land_prepare.add_argument("--lead-id", required=True)
+    land_prepare.add_argument("--target-branch", required=True)
+    land_prepare.add_argument("--target-worktree", type=pathlib.Path)
+    land_apply = commands.add_parser("land-apply", help="apply an exact Human-approved fast-forward plan")
+    land_apply.add_argument("plan", type=pathlib.Path, help="JSON output of land-prepare, stored outside the candidate worktree")
+    land_apply.add_argument("--approve-plan-digest", required=True)
+    land_apply.add_argument("--apply", action="store_true")
     bind = commands.add_parser("bind", help="Human binds an existing root Lead; never creates an agent")
     bind.add_argument("--lead-id", required=True)
     bind.add_argument("--supervisor-id")
@@ -36,7 +45,9 @@ def main() -> int:
     bind.add_argument("--apply", action="store_true")
     commands.add_parser("decisions", help="read the Human decision queue")
     commands.add_parser("bindings", help="inspect canonical authority versions, including working rooms")
-    for name in ("decide", "reopen", "resolve", "archive", "withdraw"):
+    asks = commands.add_parser("asks", help="read open questions and attention for a managed Lead")
+    asks.add_argument("--lead-id", required=True)
+    for name in ("decide", "reopen", "resolve", "archive", "withdraw", "answer-ask"):
         operation = commands.add_parser(name, help="protected Human operation; dry-run by default")
         operation.add_argument("request", type=pathlib.Path, help="JSON arguments copied from the current queue")
         operation.add_argument("--apply", action="store_true")
@@ -83,10 +94,23 @@ def main() -> int:
         result = {"applied": args.apply, "files": planned}
     else:
         proxy = proxy_module()
-        if args.command == "bind":
+        if args.command == "land-prepare":
+            result = room_land.prepare(proxy, args.lead_id, args.target_branch, args.target_worktree)
+        elif args.command == "land-apply":
+            plan = json.loads(args.plan.read_text())
+            if not isinstance(plan, dict):
+                raise workflow.WorkflowError("Land plan must be a JSON object")
+            if not args.apply:
+                result = {"applied": False, "planDigest": plan.get("planDigest"),
+                          "approvalMatches": args.approve_plan_digest == plan.get("planDigest")}
+            else:
+                result = room_land.apply(proxy, plan, args.approve_plan_digest)
+        elif args.command == "bind":
             result = proxy.bind_root_lead(args.lead_id, args.supervisor_id, args.task_class, apply=args.apply)
         elif args.command == "decisions":
             result = proxy.list_slp_decisions("human", "human", "human-queue", {})
+        elif args.command == "asks":
+            result = proxy.list_room_attention("human", "human", "human-asks", {"leadAgentId": args.lead_id})
         elif args.command == "bindings":
             with proxy.locked_leases() as registry:
                 fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest")
@@ -101,7 +125,8 @@ def main() -> int:
                 result = {"applied": False, "operation": args.command, "arguments": request}
             else:
                 operation = {"decide": proxy.record_slp_decision, "reopen": proxy.reopen_work_epoch,
-                             "resolve": proxy.resolve_slp_delivery, "archive": proxy.archive_slp_workspace}[args.command]
+                             "resolve": proxy.resolve_slp_delivery, "archive": proxy.archive_slp_workspace,
+                             "answer-ask": proxy.answer_room_ask}[args.command]
                 result = operation("human", "human", "human-" + args.command, request)
     print(json.dumps(result, indent=2, sort_keys=True))
     if isinstance(result, dict) and ("error" in result or result.get("result", {}).get("isError")):
