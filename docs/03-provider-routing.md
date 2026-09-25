@@ -30,12 +30,12 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 
 ### `codex-supervisor`
 
-- GPT-6 Sol: XHigh, model và thinking duy nhất của role provider.
+- GPT-6 Sol: High hoặc XHigh; XHigh là mặc định của role provider.
 - Mục đích: governance/front door; không dùng model choice để nhận engineering ownership.
 
 ### `claude-supervisor`
 
-- Opus 5.5: XHigh, model và thinking duy nhất của role provider; active context auto-compact ở 300K.
+- Opus 5.5: High hoặc XHigh; XHigh là mặc định của role provider; active context auto-compact ở 300K.
 - Là front door song song với Codex Supervisor; không thay `planning` route.
 - Có thể chọn `planning` hoặc `planning_claude` như Codex Supervisor; không dùng Claude native Workflow/Agent/Task.
 - Chỉ nhận Paseo control MCP qua role proxy explicit.

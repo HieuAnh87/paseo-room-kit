@@ -40,7 +40,7 @@ Cả hai hiện khai báo thinking `max`. OpenCode native provider vẫn tồn t
 ```text
 claude-supervisor
   → ~/.local/bin/claude-room supervisor
-  → Claude Opus 5.5 · XHigh
+  → Claude Opus 5.5 · High hoặc XHigh (mặc định)
   → explicit Supervisor instructions/settings/Paseo MCP
 
 claude-lead
@@ -94,7 +94,7 @@ Local installation:
 | independent room watch | `claude-watcher/claude-sonnet-5` Medium |
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
-| governance Supervisor | `claude-supervisor/claude-opus-5-5` XHigh |
+| governance Supervisor | `claude-supervisor/claude-opus-5-5` High hoặc XHigh (mặc định) |
 | engineering Lead dài hạn | `claude-lead/claude-opus-5-5` |
 | full budget Supervisor | `opencode-supervisor/aibox/deepseek-v4-flash` |
 | full budget Lead | `opencode-lead/aibox/glm-5.2` |

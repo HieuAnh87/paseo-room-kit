@@ -61,9 +61,10 @@ change, and this security repair does not require `--force`. Restart the
 daemon only after reviewing the rendered config, confirming there is no active
 agent work, and explicitly choosing to do so.
 
-After reload, `claude-supervisor/claude-opus-5-5` is available at XHigh as a
-parallel Human-facing front door. Codex Supervisor and stable Lead use
-`gpt-6-sol` at XHigh (`codex-supervisor` and `codex-lead`). A Supervisor may
+After reload, `claude-supervisor/claude-opus-5-5` is available at High or XHigh
+as a parallel Human-facing front door. Codex Supervisor also offers High or
+XHigh on `gpt-6-sol`; both Supervisors default to XHigh. The stable Lead uses
+`gpt-6-sol` at XHigh (`codex-lead`). A Supervisor may
 autonomously select `claude-lead/claude-opus-5-5` at XHigh for a new bounded
 objective, with a 300K auto-compact window; an explicit owner preference wins.
 Each Lead owns one objective/workstream in one workspace, including its bounded

@@ -208,3 +208,9 @@ Claude Supervisor đã gọi native `Workflow` để fanout năm mũi research n
 Paseo, dù provider chặn `Agent`/`Task`. Chặn thêm `Workflow` tại provider
 catalog và settings của mọi Claude role; delegation trong managed room phải
 đi qua Paseo role proxy để giữ parentage và guard.
+
+## D26 — Supervisor có thêm High
+
+Cho phép chọn High hoặc XHigh trên cả `codex-supervisor/gpt-6-sol` và
+`claude-supervisor/claude-opus-5-5`; XHigh vẫn là mặc định. Đây là lựa chọn
+thinking của chính Supervisor, không đổi mức XHigh đã pin cho Lead.

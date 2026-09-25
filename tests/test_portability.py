@@ -96,7 +96,19 @@ class PortabilityTest(unittest.TestCase):
         )
         self.assertEqual(
             claude_supervisor["models"][0]["thinkingOptions"],
-            [{"id": "xhigh", "label": "XHigh", "isDefault": True}],
+            [
+                {"id": "high", "label": "High"},
+                {"id": "xhigh", "label": "XHigh", "isDefault": True},
+            ],
+        )
+        codex_supervisor = value["agents"]["providers"]["codex-supervisor"]
+        self.assertEqual(codex_supervisor["models"][0]["id"], "gpt-6-sol")
+        self.assertEqual(
+            codex_supervisor["models"][0]["thinkingOptions"],
+            [
+                {"id": "high", "label": "High"},
+                {"id": "xhigh", "label": "XHigh", "isDefault": True},
+            ],
         )
         self.assertEqual(
             claude_supervisor["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],

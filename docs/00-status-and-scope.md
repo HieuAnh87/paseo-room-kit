@@ -59,8 +59,8 @@ Supervisor <redacted-agent>
 
 | Provider | Trạng thái/ý nghĩa |
 |---|---|
-| `claude-supervisor` | custom Human-facing Supervisor song song, dùng Opus 5.5 XHigh |
-| `codex-supervisor` | custom Supervisor, GPT-6 Sol XHigh |
+| `claude-supervisor` | custom Human-facing Supervisor song song, Opus 5.5 High/XHigh (mặc định XHigh) |
+| `codex-supervisor` | custom Supervisor, GPT-6 Sol High/XHigh (mặc định XHigh) |
 | `codex-lead` | custom Lead, GPT-6 Sol XHigh |
 | `claude-lead` | custom Lead, Opus 5.5 XHigh với auto-compact window 300K |
 | `codex-peer` | custom bounded Codex Peer, GPT-6 Luna Medium |
