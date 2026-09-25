@@ -908,11 +908,18 @@ def _attention_authority(
     if role == "supervisor":
         supervisor = load_agent_record(actor_id)
         labels = supervisor.get("labels") if isinstance(supervisor, dict) else None
+        canonical_provider = (
+            isinstance(supervisor, dict)
+            and supervisor.get("provider")
+            in {"codex-supervisor", "claude-supervisor", "opencode-supervisor"}
+        )
         if (
             not isinstance(supervisor, dict)
             or supervisor.get("archivedAt") is not None
-            or not isinstance(labels, dict)
-            or labels.get("role") != "supervisor"
+            or not (
+                isinstance(labels, dict) and labels.get("role") == "supervisor"
+                or canonical_provider
+            )
         ):
             return None
     if role == "watcher":

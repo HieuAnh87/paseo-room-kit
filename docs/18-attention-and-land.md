@@ -6,6 +6,8 @@ Các thành phần này bổ sung khả năng quan sát và thao tác Git cho wo
 
 Lead có thể dùng `open_room_ask` để ghi một câu hỏi cho Supervisor đã bind, hoặc cho Human trong direct mode. Peer không nhận Paseo control MCP; `DEPENDENCY_REQUEST` trong report của Peer tạo câu hỏi gửi Lead khi report được ghi. Mỗi câu hỏi có ID, người gửi/nhận, work epoch và trạng thái `OPEN`/`ANSWERED`. `answer_room_ask` kiểm tra người nhận cùng epoch/revision; cùng câu trả lời có thể gọi lại an toàn, câu trả lời khác bị từ chối.
 
+Supervisor mở trực tiếp từ custom provider có thể chưa có nhãn `role=supervisor`. Attention vẫn nhận seat đó khi provider là `codex-supervisor`, `claude-supervisor` hoặc `opencode-supervisor` và exact lease bind nó làm Supervisor; stock provider hoặc seat không bind vẫn bị từ chối.
+
 Từ owner shell:
 
 ```bash

@@ -128,6 +128,32 @@ class AttentionTest(unittest.TestCase):
         self.assertFalse(duplicate["answered"])
         self.assertEqual(self.lease()["revision"], 3)
 
+    def test_unlabeled_canonical_supervisor_can_read_and_answer_bound_ask(self):
+        path = self.proxy.AGENTS_ROOT / "records" / f"{SUPERVISOR}.json"
+        supervisor = json.loads(path.read_text())
+        supervisor["provider"] = "claude-supervisor"
+        supervisor["labels"] = {}
+        path.write_text(json.dumps(supervisor))
+
+        self.result(self.open())
+        listed = self.result(self.proxy.list_room_attention(
+            SUPERVISOR, "supervisor", 2, {"leadAgentId": LEAD}
+        ))
+        self.assertEqual(listed["asks"][0]["ask_id"], "ask-one")
+        answered = self.result(self.proxy.answer_room_ask(
+            SUPERVISOR, "supervisor", 3,
+            {"leadAgentId": LEAD, "askId": "ask-one", "answer": "Keep scope.",
+             "expectedWorkEpoch": 1, "expectedRevision": 2},
+        ))
+        self.assertTrue(answered["answered"])
+
+        supervisor["provider"] = "claude"
+        path.write_text(json.dumps(supervisor))
+        denied = self.proxy.list_room_attention(
+            SUPERVISOR, "supervisor", 4, {"leadAgentId": LEAD}
+        )
+        self.assertTrue(denied["result"]["isError"])
+
     def test_direct_lead_ask_targets_human(self):
         self.supervised = False
         self.write_agents()
