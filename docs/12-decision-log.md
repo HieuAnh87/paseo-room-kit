@@ -185,3 +185,11 @@ Standard Peer cho `impl`, `impl_deep`, `search` dùng GPT-6 Luna Medium. Review
 Watcher độc lập dùng Claude Sonnet 5 Medium. User chọn lịch 60 phút một lần
 để quét tất cả managed rooms và báo tín hiệu quan sát được. Role proxy chỉ mở
 read tools và attention; Watcher không có quyền governance hay engineering.
+
+## D24 — Claude Supervisor song song dùng Opus 5.5 XHigh
+
+Nâng custom `claude-supervisor` từ Opus 4.8 Medium/High/Max cũ lên Opus 5.5
+XHigh với active auto-compact window 300K. Giữ cùng governance boundary và
+quyền tự chọn `planning` hoặc `planning_claude` như Codex Supervisor. Chỉ
+mở một Lead cho mỗi bounded objective/workspace và không nhận engineering
+ownership.

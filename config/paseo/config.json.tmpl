@@ -50,6 +50,7 @@
           "supervisor"
         ],
         "env": {
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
           "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
         },
         "disallowedTools": [
@@ -58,22 +59,15 @@
         ],
         "models": [
           {
-            "id": "claude-opus-4-8",
-            "label": "Opus 4.8",
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
             "isDefault": true,
+            "contextWindowMaxTokens": 1000000,
             "thinkingOptions": [
               {
-                "id": "medium",
-                "label": "Medium",
+                "id": "xhigh",
+                "label": "XHigh",
                 "isDefault": true
-              },
-              {
-                "id": "high",
-                "label": "High"
-              },
-              {
-                "id": "max",
-                "label": "Max"
               }
             ]
           }

@@ -18,7 +18,7 @@
   },
   "preferences": [
     "The human-facing Supervisor autonomously selects planning or planning_claude for each new bounded objective. Honor an explicit Human provider choice; otherwise use planning when neither route has a clear task advantage. Never create that Lead with a stock provider.",
-    "The stable Codex Lead and Codex Supervisor use GPT-6 Sol with XHigh thinking.",
+    "The stable Codex Lead and Codex Supervisor use GPT-6 Sol with XHigh thinking. The parallel Claude Supervisor uses Opus 5.5 with XHigh thinking and the same Lead routing contract.",
     "Use planning with lead_profile=stable for Codex Lead or planning_claude with lead_profile=claude for Claude Lead. Select once before creation, pin the route for that work epoch, and never switch an active Lead's provider in place.",
     "The Claude Lead uses Opus 5.5 at XHigh thinking with a 300000-token auto-compact window. Treat its 1M context as headroom, not a target working set.",
     "One Lead owns one bounded objective/workstream in one workspace. Keep follow-ups within its work epoch protocol; create a separate isolated workspace for an independent objective only when write scopes do not overlap, otherwise serialize.",

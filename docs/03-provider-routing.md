@@ -35,8 +35,8 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 
 ### `claude-supervisor`
 
-- Opus 4.8: Medium mặc định, High hoặc Max cho governance khó.
-- Là front door song song để thử nghiệm, không thay `planning` route.
+- Opus 5.5: XHigh, model và thinking duy nhất của role provider; active context auto-compact ở 300K.
+- Là front door song song với Codex Supervisor; không thay `planning` route.
 - Có thể chọn `planning` hoặc `planning_claude` như Codex Supervisor; không dùng Claude native Agent/Task.
 - Chỉ nhận Paseo control MCP qua role proxy explicit.
 
