@@ -193,3 +193,18 @@ XHigh với active auto-compact window 300K. Giữ cùng governance boundary và
 quyền tự chọn `planning` hoặc `planning_claude` như Codex Supervisor. Chỉ
 mở một Lead cho mỗi bounded objective/workspace và không nhận engineering
 ownership.
+
+## D25 — Supervisor tự mở Lead cho objective kỹ thuật rõ ràng
+
+Một phiên Claude Supervisor đã trả lời nhiều lượt nghiên cứu/thiết kế thông báo
+trực tiếp và không gọi `create_agent`, dù role MCP có tool này. Câu "chỉ
+bootstrap khi Human yêu cầu supervised room" mâu thuẫn với quyết định tự
+chọn Lead. Bỏ điều kiện từ khoá: khi objective kỹ thuật đã rõ, kể cả thiết kế
+kiến trúc hay research, Supervisor kiểm tra owner rồi mở đúng một Lead trước
+khi tự đi sâu vào lời giải. Định hướng chung hoặc một câu hỏi sự kiện lẻ vẫn
+có thể trả lời ngay mà không tạo room.
+
+Claude Supervisor đã gọi native `Workflow` để fanout năm mũi research ngoài
+Paseo, dù provider chặn `Agent`/`Task`. Chặn thêm `Workflow` tại provider
+catalog và settings của mọi Claude role; delegation trong managed room phải
+đi qua Paseo role proxy để giữ parentage và guard.

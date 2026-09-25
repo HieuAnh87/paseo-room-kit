@@ -103,6 +103,7 @@ class PortabilityTest(unittest.TestCase):
             "300000",
         )
         self.assertIn("Agent", claude_supervisor["disallowedTools"])
+        self.assertIn("Workflow", claude_supervisor["disallowedTools"])
         claude_lead = value["agents"]["providers"]["claude-lead"]
         self.assertEqual(claude_lead["extends"], "claude")
         self.assertEqual(
@@ -118,6 +119,15 @@ class PortabilityTest(unittest.TestCase):
             "xhigh",
         )
         self.assertIn("Agent", claude_lead["disallowedTools"])
+        self.assertIn("Workflow", claude_lead["disallowedTools"])
+
+        for role in ("supervisor", "lead", "peer", "watcher"):
+            settings = json.loads(
+                (ROOT / f"config/claude/{role}.settings.json.tmpl")
+                .read_text()
+                .replace("{{HOME}}", str(home))
+            )
+            self.assertIn("Workflow", settings["permissions"]["deny"])
 
         reviewer = value["agents"]["providers"]["claude-reviewer"]
         self.assertEqual(reviewer["models"][0]["id"], "claude-opus-5-5")

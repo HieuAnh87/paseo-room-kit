@@ -37,7 +37,7 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 
 - Opus 5.5: XHigh, model và thinking duy nhất của role provider; active context auto-compact ở 300K.
 - Là front door song song với Codex Supervisor; không thay `planning` route.
-- Có thể chọn `planning` hoặc `planning_claude` như Codex Supervisor; không dùng Claude native Agent/Task.
+- Có thể chọn `planning` hoặc `planning_claude` như Codex Supervisor; không dùng Claude native Workflow/Agent/Task.
 - Chỉ nhận Paseo control MCP qua role proxy explicit.
 
 ### `opencode-supervisor`
@@ -56,7 +56,7 @@ Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc
 - Opus 5.5 1M: XHigh, là model duy nhất của provider.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`: 1M là capacity ceiling, active window được compact sớm.
 - Được Supervisor chọn bằng `planning_claude` khi mở objective mới; Human có thể chỉ định Codex hoặc Claude.
-- Dùng `claude-room lead`, role-aware Paseo MCP và cùng Lead lease/handback contract; Claude native Agent/Task bị deny.
+- Dùng `claude-room lead`, role-aware Paseo MCP và cùng Lead lease/handback contract; Claude native Workflow/Agent/Task bị deny.
 
 ### `opencode-lead`
 

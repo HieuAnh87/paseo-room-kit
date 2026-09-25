@@ -52,7 +52,7 @@ claude-lead
 `claude-supervisor` là Human-facing front door song song. `claude-lead` là
 engineering owner được Supervisor tự chọn cho objective phù hợp; Human có thể
 chỉ định route. `planning` vẫn là `codex-lead/gpt-6-sol`. Wrapper dùng strict MCP config,
-chặn native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
+chặn native `Workflow`/`Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
 mọi delegation qua Paseo. Claude Lead dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
 chính thức của Claude Code để giới hạn active window ở 300K dù model có ceiling
 1M.
