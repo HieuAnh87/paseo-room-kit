@@ -388,6 +388,62 @@
           "approval_policy": "never",
           "web_search": "disabled"
         }
+      },
+      "antigravity-cli": {
+        "enabled": true,
+        "paseoTools": {
+          "enabled": false
+        },
+        "label": "Antigravity UI",
+        "description": "Bounded UI design and implementation through the installed Antigravity CLI plugin",
+        "models": [
+          {
+            "id": "gemini-3.8-flash",
+            "label": "Gemini 3.8 Flash",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "high",
+                "label": "High",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
+      },
+      "claude-ui": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "claude",
+        "label": "Claude UI",
+        "description": "Bounded UI design and implementation using Opus 5.5 High",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "ui"
+        ],
+        "env": {
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task",
+          "Workflow"
+        ],
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "high",
+                "label": "High",
+                "isDefault": true
+              }
+            ]
+          }
+        ]
       }
     }
   },

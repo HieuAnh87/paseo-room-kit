@@ -2,7 +2,7 @@
 
 ## Kết luận ngắn
 
-Task mới chọn L, LP (mặc định khi Human bind root Lead) hoặc SLP, với provider custom tách vai trò. Standard stack dùng GPT-6 Luna High/XHigh/Max cho bounded Peer, GPT-6.1 Sol cho `impl_deep` và Claude Opus 5.5 High cho Reviewer; route UI hiện dùng Codex Peer.
+Task mới chọn L, LP (mặc định khi Human bind root Lead) hoặc SLP, với provider custom tách vai trò. Standard stack dùng GPT-6 Luna High/XHigh/Max cho bounded Peer, GPT-6.1 Sol cho `impl_deep` và Claude Opus 5.5 High cho Reviewer; route UI dùng Antigravity Gemini 3.8 Flash High; Opus 5.5 High là lựa chọn tường minh.
 
 Điểm quan trọng: topology được bảo vệ bằng provider/profile contract, role-aware Paseo MCP proxy, OpenCode permission, CLI wrapper và Lead lease registry. Codex lifecycle hooks chỉ còn là defense-in-depth vì `app-server` có specialized tool paths không phát hook. Đây là deterministic workflow isolation, không phải cryptographic isolation khỏi một process hostile có quyền đọc filesystem/process.
 
@@ -67,6 +67,8 @@ Supervisor <redacted-agent>
 | `claude-reviewer` | custom read-only Reviewer, Opus 5.5 High |
 | `codex-watcher` | custom independent Watcher, GPT-6 Luna Medium |
 | `opencode-peer` | adapter OpenCode ACP Peer, AI Box DeepSeek/GLM; hiện disabled |
+| `antigravity-cli` | UI engineering Peer, Gemini 3.8 Flash High qua plugin Antigravity CLI |
+| `claude-ui` | UI engineering Peer thay thế tường minh, Opus 5.5 High; tách khỏi Reviewer |
 | `gemini-ui` | adapter ACP qua antigravity-acp, model catalog giới hạn về Gemini; hiện disabled |
 | `claude` | built-in Claude đang enabled cho direct/manual use; không phải internal role route |
 | stock `codex`/`opencode` | vẫn có thể xuất hiện trong daemon nhưng không được profile cho phép dùng để tạo Lead/Peer mới trong chain custom |

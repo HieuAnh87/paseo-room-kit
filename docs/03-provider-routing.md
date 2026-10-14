@@ -13,14 +13,15 @@ Nguồn chính: `~/.paseo/orchestration-preferences.json`.
 | `search` | `codex-peer/gpt-6-luna` | High / XHigh / Max | delegated codebase navigation/search |
 | `audit` | `claude-reviewer/claude-opus-5-5` | High | review độc lập, read-only |
 | `research` | `codex-peer/gpt-6-luna` | High / XHigh / Max | research/background scan |
-| `ui` | `codex-peer/gpt-6-luna` | High / XHigh / Max | UI/design work |
+| `ui` | `antigravity-cli/gemini-3.8-flash` | High | UI design and implementation |
+| `ui_opus` | `claude-ui/claude-opus-5-5` | High | explicit alternative UI Peer; requires `ui_choice_reason` |
 
 
 `impl_deep` và `search` là custom semantic routes do Lead profile hiểu. Các Paseo skill chuẩn biết các category `impl`, `ui`, `research`, `planning`, `audit`; vì vậy khi dùng skill generic cần kiểm tra preference và brief của Lead, không tự giả định `impl_deep`/`search` là category built-in.
 
 Codex/Claude Supervisor tự chọn giữa `planning` và `planning_claude` lúc mở một bounded objective, theo tính chất việc và ưu tiên Human nếu có. Khi không có lợi thế rõ, dùng Codex. Model được pin vào binding cho suốt phiên Lead. Mỗi Lead sở hữu một objective/workstream trong một workspace; objective độc lập cần workspace/worktree riêng và chỉ chạy song song khi phạm vi ghi không chồng nhau. Giới hạn một Lead mỗi workspace do guard bảo vệ; kiểm tra chồng phạm vi giữa workspace hiện là quy tắc workflow của Supervisor.
 
-Các adapter `opencode-peer` và `gemini-ui` đang tắt trên host hiện tại; route `research`/`ui` dùng Codex Peer đang bật. Catalog adapter bên dưới là cấu hình dự phòng, không phải route đang hoạt động. Không tự rơi về stock provider.
+Các adapter `opencode-peer` và `gemini-ui` đang tắt trên host hiện tại; route `research` dùng Codex Peer; `ui` dùng Antigravity CLI plugin và `ui_opus` dùng Claude UI. Catalog adapter bên dưới là cấu hình dự phòng, không phải route đang hoạt động. Không tự rơi về stock provider.
 
 ## Model catalog theo provider
 
@@ -53,7 +54,7 @@ Các adapter `opencode-peer` và `gemini-ui` đang tắt trên host hiện tại
 ### `codex-peer`
 
 - GPT-6 Luna có ba mức High (mặc định), XHigh và Max cho Peer chuẩn. Guard giữ nguyên mức hợp lệ đã chọn.
-- `impl`, `search`, `research` và `ui` dùng Luna. `impl_deep` dùng GPT-6.1 Sol, cũng với High (mặc định), XHigh hoặc Max. Effort hợp lệ được giữ nguyên.
+- `impl`, `search` và `research` dùng Luna. `impl_deep` dùng GPT-6.1 Sol, cũng với High (mặc định), XHigh hoặc Max. Effort hợp lệ được giữ nguyên.
 
 ### `claude-reviewer` và `codex-watcher`
 
@@ -98,7 +99,7 @@ Delegated search dùng cùng GPT-6 Luna High/XHigh/Max profile của Peer.
 Các route implementation/search và review:
 
 ```text
-standard implementation/search/research/ui → GPT-6 Luna High (default) / XHigh / Max
+standard implementation/search/research → GPT-6 Luna High (default) / XHigh / Max
 deep implementation                       → GPT-6.1 Sol High (default) / XHigh / Max
 standard review                → Claude Opus 5.5 High
 ```
@@ -109,9 +110,11 @@ DeepSeek/GLM trên AI Box hiện chỉ khai báo Max; không tự thêm `none`/`
 
 Lead phải inspect agent ngay sau `create_agent`:
 
-1. provider phải khớp role route (`codex-peer/`, `claude-reviewer/`, `opencode-peer/`, `gemini-ui/`);
+1. provider phải khớp role route (`codex-peer/`, `claude-reviewer/`, `opencode-peer/`, `antigravity-cli/`, `claude-ui/`);
 2. model phải khớp model đã chọn;
 3. thinking phải khớp assignment;
 4. nếu rơi về stock `codex/` hoặc sai provider thì dừng chain, không gửi work tiếp.
 
 Lý do guard tồn tại được ghi ở [12-decision-log.md](12-decision-log.md): trace `<redacted-agent-id>` từng tạo stock `codex/gpt-5.4` cho Lead và Peer.
+
+UI uses High with writable `accept-edits` (Antigravity) or `acceptEdits` (Claude). `ui_opus` requires `ui_choice_reason`; see [UI specialists](23-ui-specialists.md). The legacy `gemini-ui` model list above is inactive.

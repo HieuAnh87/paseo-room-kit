@@ -51,6 +51,8 @@ ROUTE_THINKING = {
     "search": "high",
     "research": "max",
     "audit": "high",
+    "ui": "high",
+    "ui_opus": "high",
 }
 
 TARGET_MUTATIONS = {
@@ -693,6 +695,17 @@ def peer_route_provider_key(route: str, stack_profile: str) -> str:
     return f"{route}_budget" if stack_profile == "budget" else route
 
 
+def validate_ui_choice(route: str, labels: dict[str, Any], settings: dict[str, Any]) -> None:
+    if route not in {"ui", "ui_opus"}:
+        return
+    if settings.get("thinkingOptionId", "high") != "high":
+        deny("UI routes require High thinking.")
+    if route == "ui_opus":
+        reason = labels.get("ui_choice_reason")
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 1024:
+            deny("ui_opus requires ui_choice_reason recording Human request or deliberate Lead choice; no silent fallback.")
+
+
 def peer_route_thinking(
     route: str, stack_profile: str, settings: dict[str, Any] | None = None
 ) -> str | None:
@@ -820,9 +833,10 @@ def guard_create_agent(
         route = labels.get(ROUTE_LABEL)
         if not route:
             deny("Lead must label every Peer creation with an explicit route.")
-        allowed_routes = {"impl", "impl_deep", "search", "ui", "research", "audit"}
+        allowed_routes = {"impl", "impl_deep", "search", "ui", "ui_opus", "research", "audit"}
         if route not in allowed_routes:
             deny(f"Lead cannot create route {route!r}.")
+        validate_ui_choice(route, labels, settings)
         stack_profile = current_lead_stack_profile()
         provider_key = peer_route_provider_key(route, stack_profile)
         expected = providers.get(provider_key)
@@ -840,6 +854,8 @@ def guard_create_agent(
         disposition = labels.get("disposition", "reviewer" if route == "audit" else "engineer").lower()
         if disposition not in {"engineer", "architect", "reviewer", "scout"}:
             deny("Peer disposition must be engineer, architect, reviewer or scout.")
+        if route in {"ui", "ui_opus"} and disposition != "engineer":
+            deny("UI routes require an engineering disposition; use audit for independent review.")
         if route == "audit" and disposition != "reviewer":
             deny("Audit route requires a read-only reviewer disposition.")
         labels["disposition"] = disposition
@@ -869,11 +885,24 @@ def guard_create_agent(
             "Keep the Task outcome line for native callback compatibility. "
             + ("This is an inspection-only assignment: do not write files or change code." if disposition != "engineer" else "Own proof of writes within the assigned scope.")
         )
+        if route in {"ui", "ui_opus"}:
+            updated["initialPrompt"] += (
+                "\nUI engineering Peer: own only the assigned frontend scope; preserve others' edits. "
+                "Do not spawn subagents, delegate, contact governance, or change backend contracts. "
+                "Implement and check the rendered UI at wide/compact sizes and light/dark themes when available. "
+                "Use existing theme tokens and accessible controls. Report unavailable visual checks honestly. "
+                "payload.evidence must be a non-empty STRING; no arrays or objects. "
+                "Lead owns engineering acceptance; you cannot approve your own work."
+            )
         required_thinking = peer_route_thinking(route, stack_profile, settings)
         if required_thinking:
             settings["thinkingOptionId"] = required_thinking
         if provider.startswith("codex-peer/"):
             settings["modeId"] = "full-access"
+        if provider.startswith("antigravity-cli/"):
+            settings["modeId"] = "accept-edits"
+        if provider.startswith("claude-ui/"):
+            settings["modeId"] = "acceptEdits"
         if provider.startswith("claude-reviewer/"):
             settings["modeId"] = "plan"
         if provider.startswith("opencode-peer/"):
@@ -966,11 +995,14 @@ def guard_nested_create_agent(
     if tool_input.get("notifyOnFinish") is not True:
         deny("Nested Peer create_agent requires notifyOnFinish: true.")
     route = labels.get(ROUTE_LABEL)
-    allowed_routes = {"impl", "impl_deep", "search", "ui", "research", "audit"}
+    allowed_routes = {"impl", "impl_deep", "search", "ui", "ui_opus", "research", "audit"}
     if route not in allowed_routes:
         deny(f"Lead must use an allowed static Peer route, not {route!r}.")
+    if route in {"ui", "ui_opus"} and (labels.get("disposition") != "engineer" or labels.get("write_mode") != "write"):
+        deny("UI routes require an engineering disposition and write scope.")
     if route == "audit" and (labels.get("disposition") != "reviewer" or labels.get("write_mode") != "read_only"):
         deny("Nested audit Peer requires reviewer disposition and read-only scope.")
+    validate_ui_choice(route, labels, settings)
     stack_profile = current_lead_stack_profile()
     provider_key = peer_route_provider_key(route, stack_profile)
     expected = providers.get(provider_key)
@@ -994,6 +1026,10 @@ def guard_nested_create_agent(
         deny(f"Peer route {route} requires thinkingOptionId: {required_thinking}.")
     if provider.startswith("codex-peer/") and settings.get("modeId") != "full-access":
         deny("Codex Peer creation requires settings.modeId: full-access.")
+    if provider.startswith("antigravity-cli/") and settings.get("modeId") != "accept-edits":
+        deny("Antigravity UI requires settings.modeId: accept-edits.")
+    if provider.startswith("claude-ui/") and settings.get("modeId") != "acceptEdits":
+        deny("Claude UI requires settings.modeId: acceptEdits.")
     if provider.startswith("claude-reviewer/") and settings.get("modeId") != "plan":
         deny("Claude Reviewer creation requires settings.modeId: plan.")
     if provider.startswith("opencode-peer/") and settings.get("modeId") != "build":
@@ -1087,6 +1123,14 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
                 tasks.require_peer_current(lease, labels)
             except workflow.WorkflowError as error:
                 deny(str(error))
+        if labels.get(ROUTE_LABEL) in {"ui", "ui_opus"}:
+            if tool_name == "set_agent_mode" or (tool_name == "update_agent" and tool_input.get("settings")):
+                deny("UI runtime is fixed for this assignment; report a blocker instead of switching model/mode/effort in place.")
+            changed = tool_input.get("labels")
+            if tool_name == "update_agent" and isinstance(changed, dict):
+                for key in (ROUTE_LABEL, "ui_choice_reason"):
+                    if key in changed and changed[key] != labels.get(key):
+                        deny(f"UI assignment label {key} is fixed for this assignment.")
         if tool_name == "update_agent" and isinstance(tool_input.get("labels"), dict):
             for key in (ROLE_LABEL, PARENT_LABEL, ROOM_KIND_LABEL, WORK_EPOCH_LABEL, "assignment_id", "callback_transport", "disposition", "write_mode", "task_id", "task_revision"):
                 if key in tool_input["labels"] and tool_input["labels"][key] != labels.get(key):

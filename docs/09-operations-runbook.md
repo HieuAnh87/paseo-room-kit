@@ -49,7 +49,7 @@ Kiểm tra tối thiểu:
 ```text
 Supervisor: provider starts codex-supervisor/, claude-supervisor/
 Lead: provider starts codex-lead/, claude-lead/, khớp lead_profile, stack_profile và lease
-Peer: provider starts codex-peer/, opencode-peer/ hoặc gemini-ui/
+Peer: provider matches the exact configured route (codex-peer/, claude-reviewer/, antigravity-cli/ or claude-ui/). UI defaults to Antigravity High; ui_opus requires ui_choice_reason.
 ParentAgentId: đúng owner
 Cwd/workspace: đúng project
 Model/thinking: đúng route

@@ -144,6 +144,8 @@ required = {
     "codex-lead",
     "claude-lead",
     "claude-reviewer",
+    "claude-ui",
+    "antigravity-cli",
     "codex-watcher",
     "codex-peer",
     "opencode-peer",
@@ -298,7 +300,7 @@ if [[ "$mode" == "--live" ]]; then
         "installed Claude ${role} ${asset}"
     done
   done
-  for role in peer watcher; do
+  for role in peer watcher ui; do
     for asset in instructions.md settings.json mcp.json; do
       check_installed_render \
         "${repo_root}/config/claude/${role}.${asset}.tmpl" \
