@@ -11,19 +11,9 @@ opencode-peer
   → ~/.config/opencode/paseo-peer.json
 ```
 
-Budget stack dùng thêm:
-
-```text
-opencode-supervisor → DeepSeek V4 Flash Max → role Supervisor config
-opencode-lead       → GLM 5.2 Max          → role Lead config
-opencode-peer       → DeepSeek V4 Flash Max → role Peer config
-ui route            → Gemini qua agy
-```
-
-Supervisor và Lead nhận role-aware Paseo MCP. Peer không nhận control MCP.
-Mỗi role chạy bằng config OpenCode riêng; inline config layer được nạp sau
-project config để project-local settings không thể vô tình bật lại native task
-delegation hoặc đổi control MCP của room.
+OpenCode hiện chỉ có Peer research qua AI Box. Các vai trò OpenCode
+Supervisor/Lead của budget stack đã được gỡ. Peer dùng config riêng,
+không nhận control MCP và không được native task delegation.
 
 Wrapper hiện tại cố ý dùng `--pure` để OpenCode Peer không tự dựng một control plane khác. Catalog được rút gọn còn:
 
@@ -40,20 +30,20 @@ Cả hai hiện khai báo thinking `max`. OpenCode native provider vẫn tồn t
 ```text
 claude-supervisor
   → ~/.local/bin/claude-room supervisor
-  → Claude Opus 4.8
+  → Claude Opus 5.5 · High hoặc XHigh (mặc định)
   → explicit Supervisor instructions/settings/Paseo MCP
 
 claude-lead
   → ~/.local/bin/claude-room lead
-  → Claude Sonnet 5 1M · High
+  → Claude Opus 5.5 1M · XHigh
   → 300K auto-compact window + Lead instructions/settings/Paseo MCP
 ```
 
 `claude-supervisor` là Human-facing front door song song. `claude-lead` là
-engineering-owner pilot riêng và chỉ được route khi Human yêu cầu rõ; stable
-`planning` vẫn là `codex-lead/gpt-5.6-sol`. Wrapper dùng strict MCP config,
-chặn native `Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
-mọi delegation qua Paseo. Lead pilot dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
+engineering owner được Supervisor tự chọn cho objective phù hợp; Human có thể
+chỉ định route. `planning` vẫn là `codex-lead/gpt-6.1-sol`. Wrapper dùng strict MCP config,
+chặn native `Workflow`/`Agent`/`Task`, tắt background tasks/slash commands/Chrome, và đưa
+mọi delegation qua Paseo. Claude Lead dùng biến `CLAUDE_CODE_AUTO_COMPACT_WINDOW`
 chính thức của Claude Code để giới hạn active window ở 300K dù model có ceiling
 1M.
 
@@ -89,14 +79,13 @@ Local installation:
 
 | Nhu cầu | Chọn |
 |---|---|
-| mechanical implementation | `opencode-peer/aibox/deepseek-v4-flash` |
-| hard implementation/review | `codex-peer/gpt-5.6-luna` |
+| bounded implementation/search | `codex-peer/gpt-6-luna` High/XHigh/Max |
+| independent review | `claude-reviewer/claude-opus-5-5` High |
+| independent room watch | `codex-watcher/gpt-6-luna` Medium |
 | UI/design | `gemini-ui/gemini-3.6-flash-medium` |
 | external research | `opencode-peer/aibox/deepseek-v4-flash` |
-| governance Supervisor thử nghiệm | `claude-supervisor/claude-opus-4-8` |
-| engineering Lead pilot dài hạn | `claude-lead/claude-sonnet-5[1m]` |
-| full budget Supervisor | `opencode-supervisor/aibox/deepseek-v4-flash` |
-| full budget Lead | `opencode-lead/aibox/glm-5.2` |
+| governance Supervisor | `claude-supervisor/claude-opus-5-5` High hoặc XHigh (mặc định) |
+| engineering Lead dài hạn | `claude-lead/claude-opus-5-5` |
 | direct interactive Claude | built-in `claude`, không tự đưa vào Peer route |
 
 ## Auth/config boundary

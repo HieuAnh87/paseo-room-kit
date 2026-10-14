@@ -3,20 +3,45 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime as dt
+import fcntl
+import hashlib
 import json
 import os
 import pathlib
 import re
 import subprocess
+import stat
+import time
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 import uuid
 from typing import Any
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import room_workflow as workflow
+import room_attention as attention
+import room_tasks as tasks
 
 GUARD = pathlib.Path.home() / ".codex/hooks/room-role-guard.py"
 AGENTS_ROOT = pathlib.Path.home() / ".paseo/agents"
+LEASES_PATH = pathlib.Path(
+    os.environ.get("ROOM_GUARD_LEASES_PATH")
+    or os.environ.get("PASEO_ROOM_LEASES_PATH")
+    or pathlib.Path.home() / ".config/room-workflow/lead-leases.json"
+)
+WORKSPACES_PATH = pathlib.Path(
+    os.environ.get("ROOM_GUARD_WORKSPACES_PATH")
+    or pathlib.Path.home() / ".paseo/projects/workspaces.json"
+)
+HISTORY_PATH = pathlib.Path(
+    os.environ.get("ROOM_GUARD_HISTORY_PATH")
+    or os.environ.get("PASEO_ROOM_HISTORY_PATH")
+    or pathlib.Path.home() / ".config/room-workflow/slp-decision-history.jsonl"
+)
 UPSTREAM = "http://127.0.0.1:6767/mcp/agents"
 AGENT_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -38,12 +63,286 @@ HAND_BACK_TOOL = {
                 "type": "string",
                 "minLength": 1,
                 "description": "Final validated outcome, evidence, and any remaining risk.",
-            }
+            },
+            "candidateDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
         },
         "required": ["message"],
         "additionalProperties": False,
     },
     "execution": {"taskSupport": "forbidden"},
+}
+
+def workflow_tool(name: str, description: str, properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {"name": name, "description": description,
+            "inputSchema": {"type": "object", "properties": properties, "required": required, "additionalProperties": False},
+            "execution": {"taskSupport": "forbidden"}}
+
+
+WORK_CONTEXT_TOOL = workflow_tool(
+    "inspect_work_context", "Lead-only: inspect pinned repository protocol, task gates and authority without choosing engineering methods.", {}, [])
+WORK_CANDIDATE_TOOL = workflow_tool(
+    "inspect_work_candidate", "Lead-only: identify the exact Git working candidate, including untracked changes, without creating a commit.", {}, [])
+PEER_REPORT_TOOL = workflow_tool(
+    "record_peer_report", "Lead-only: validate and deduplicate an evidence-bearing Peer report against assignment, parentage, epoch and candidate.",
+    {"report": {"type": "object"}}, ["report"])
+OPEN_ROOM_ASK_TOOL = workflow_tool(
+    "open_room_ask", "Lead-only: record a question for the bound Supervisor, or the Human owner in direct mode. No prompt is sent automatically.",
+    {"askId": {"type": "string", "minLength": 1}, "question": {"type": "string", "minLength": 1},
+     "expectedWorkEpoch": {"type": "integer", "minimum": 1}, "expectedRevision": {"type": "integer", "minimum": 1}},
+    ["askId", "question", "expectedWorkEpoch", "expectedRevision"])
+ANSWER_ROOM_ASK_TOOL = workflow_tool(
+    "answer_room_ask", "Lead or bound Supervisor: answer a question addressed to this seat. The Human owner answers direct-mode asks from the owner-shell CLI. Answering does not accept a task or change the work epoch.",
+    {"leadAgentId": {"type": "string", "minLength": 1}, "askId": {"type": "string", "minLength": 1},
+     "answer": {"type": "string", "minLength": 1}, "expectedWorkEpoch": {"type": "integer", "minimum": 1},
+     "expectedRevision": {"type": "integer", "minimum": 1}},
+    ["leadAgentId", "askId", "answer", "expectedWorkEpoch", "expectedRevision"])
+LIST_ROOM_ATTENTION_TOOL = workflow_tool(
+    "list_room_attention", "Lead, bound Supervisor, or read-only Watcher: inspect current-epoch questions and reminder/escalation signals without sending messages.",
+    {"leadAgentId": {"type": "string", "minLength": 1}}, ["leadAgentId"])
+LIST_ROOM_ATTENTION_TOOL["annotations"] = {"readOnlyHint": True}
+LIST_ROOM_OBSERVATIONS_TOOL = workflow_tool(
+    "list_room_observations", "Read-only: join exact assignment briefs, correlated Peer reports, Lead resolutions and Human steering receipts. Missing evidence is UNKNOWN; this tool never judges code or acceptance.",
+    {"leadAgentId": {"type": "string", "minLength": 1}}, ["leadAgentId"])
+LIST_ROOM_OBSERVATIONS_TOOL["annotations"] = {"readOnlyHint": True}
+RESOLVE_PEER_REPORT_TOOL = workflow_tool(
+    "resolve_peer_report", "Lead-only: close or explicitly defer/escalate a REOPEN_REQUEST with a decision, evidence and next action. Changed work needs evidence for the current candidate.",
+    {"reportId": {"type": "string", "minLength": 1},
+     "outcome": {"enum": sorted(attention.RESOLUTION_OUTCOMES)},
+     "decision": {"type": "string", "minLength": 1}, "evidence": {"type": "string", "minLength": 1},
+     "nextAction": {"type": "string", "minLength": 1}, "changesWork": {"type": "boolean"},
+     "candidateDigest": {"type": "string"}, "owner": {"type": "string"}, "checkpoint": {"type": "string"},
+     "expectedWorkEpoch": {"type": "integer", "minimum": 1}, "expectedRevision": {"type": "integer", "minimum": 1}},
+    ["reportId", "outcome", "decision", "evidence", "nextAction", "changesWork", "expectedWorkEpoch", "expectedRevision"])
+STEER_ROOM_PEER_TOOL = workflow_tool(
+    "steer_room_peer", "Bound Supervisor only: consume an exact Human owner-shell grant. Notify Lead before prompting the pinned Peer; no scope/authority widening. Never retry uncertain delivery.",
+    {"leadAgentId": {"type": "string", "minLength": 1}, "grantId": {"type": "string", "minLength": 1},
+     "expectedWorkEpoch": {"type": "integer", "minimum": 1}, "expectedRevision": {"type": "integer", "minimum": 1}},
+    ["leadAgentId", "grantId", "expectedWorkEpoch", "expectedRevision"])
+INSPECT_PEER_ATTENTION_TOOL = workflow_tool(
+    "inspect_peer_attention", "Lead-only: inspect current owned Peers for a possible ended turn without handback. Signals are diagnostic and never complete an assignment.",
+    {}, [])
+TASK_VERSION_FIELDS = {"expectedWorkEpoch": {"type": "integer", "minimum": 1},
+                       "expectedRevision": {"type": "integer", "minimum": 1}}
+TASK_VERSION_REQUIRED = list(TASK_VERSION_FIELDS)
+DEFINE_WORK_TASK_TOOL = workflow_tool(
+    "define_work_task", "Lead-only: define an optional bounded task with literal write scope, existing prerequisites and fixed repository checks. No dispatch or acceptance occurs.",
+    {**TASK_VERSION_FIELDS, "taskId": {"type": "string"}, "objective": {"type": "string"},
+     "write": {"type": "boolean"}, "scope": {"type": "array", "items": {"type": "string"}},
+     "dependsOn": {"type": "array", "items": {"type": "string"}},
+     "requiredChecks": {"type": "array", "items": {"type": "string"}}},
+    TASK_VERSION_REQUIRED + ["taskId", "objective", "write", "scope", "dependsOn", "requiredChecks"])
+SETTLE_WORK_TASK_TOOL = workflow_tool(
+    "settle_work_task", "Lead-only: after quiescing the writer, explicitly accept current task proof or cancel an assignment/reservation. Idle alone never accepts work.",
+    {**TASK_VERSION_FIELDS, "taskId": {"type": "string"}, "decision": {"enum": ["ACCEPTED", "CANCELLED"]},
+     "evidence": {"type": "string"}, "writersQuiescent": {"const": True}, "candidateDigest": {"type": "string"}},
+    TASK_VERSION_REQUIRED + ["taskId", "decision", "evidence", "writersQuiescent"])
+REOPEN_WORK_TASK_TOOL = workflow_tool(
+    "reopen_work_task", "Lead-only: reopen a settled task with evidence, advance its revision and hold descendant dispatch/acceptance. Existing writer reservations remain held until explicit quiescent settlement.",
+    {**TASK_VERSION_FIELDS, "taskId": {"type": "string"}, "evidence": {"type": "string"}},
+    TASK_VERSION_REQUIRED + ["taskId", "evidence"])
+INSPECT_WORK_TASKS_TOOL = workflow_tool(
+    "inspect_work_tasks", "Lead-only: read this epoch's task DAG, logical write reservations and local executor receipts. This does not judge evidence quality or Human acceptance.", {}, [])
+INSPECT_WORK_TASKS_TOOL["annotations"] = {"readOnlyHint": True}
+RUN_WORK_CHECK_TOOL = workflow_tool(
+    "run_work_check", "Lead-only: run a fixed repository recipe with timeout/output bounds, record argv/exit/output hash and bracket the exact candidate. A changed candidate cannot pass.",
+    {**TASK_VERSION_FIELDS, "taskId": {"type": "string"}, "recipeId": {"type": "string"},
+     "candidateDigest": {"type": "string"}}, TASK_VERSION_REQUIRED + ["taskId", "recipeId", "candidateDigest"])
+TASK_TOOLS = (DEFINE_WORK_TASK_TOOL, SETTLE_WORK_TASK_TOOL, REOPEN_WORK_TASK_TOOL, INSPECT_WORK_TASKS_TOOL, RUN_WORK_CHECK_TOOL)
+SUBMIT_RESULT_TOOL = {**HAND_BACK_TOOL, "name": "submit_work_result", "description": (
+    "Lead-only: submit one final epoch result to the bound governance observer, or durably to Human when working directly. Candidate-bound protocol gates apply.")}
+
+LIST_SLP_DECISIONS_TOOL = {
+    "name": "list_slp_decisions",
+    "title": "List managed room decisions",
+    "description": (
+        "Supervisor-only: list managed SLP room handbacks awaiting a Human "
+        "accept, abandon, or bounded-follow-up decision."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+REOPEN_WORK_EPOCH_TOOL = {
+    "name": "reopen_work_epoch",
+    "title": "Reopen managed room work",
+    "description": (
+        "Supervisor-only: after a Human requests bounded follow-up on a "
+        "HANDBACK_READY managed room, advance its work epoch and prompt its Lead."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "prompt": {"type": "string", "minLength": 1},
+            "expectedWorkEpoch": {"type": "integer", "minimum": 1},
+            "expectedRevision": {"type": "integer", "minimum": 1},
+        },
+        "required": ["agentId", "prompt", "expectedWorkEpoch", "expectedRevision"],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+RESOLVE_SLP_DELIVERY_TOOL = {
+    "name": "resolve_slp_delivery",
+    "title": "Resolve uncertain managed-room delivery",
+    "description": (
+        "Supervisor-only: after Human inspection, resolve an interrupted "
+        "handback, follow-up, or archive dispatch without automatically retrying it."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "resolution": {"enum": ["DELIVERED", "NOT_DELIVERED"]},
+            "expectedWorkEpoch": {"type": "integer", "minimum": 1},
+            "expectedRevision": {"type": "integer", "minimum": 1},
+            "correlationId": {"type": "string", "minLength": 1},
+        },
+        "required": [
+            "agentId", "resolution", "expectedWorkEpoch", "expectedRevision", "correlationId"
+        ],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+RECORD_SLP_DECISION_TOOL = {
+    "name": "record_slp_decision",
+    "title": "Record a managed-room Human decision",
+    "description": (
+        "Supervisor-only: bind Human acceptance or abandonment to the immutable "
+        "evidence digest for one ready work epoch."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "decision": {"enum": ["ACCEPTED", "ABANDONED"]},
+            "evidenceDigest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "expectedWorkEpoch": {"type": "integer", "minimum": 1},
+            "expectedRevision": {"type": "integer", "minimum": 1},
+        },
+        "required": [
+            "agentId", "decision", "evidenceDigest", "expectedWorkEpoch", "expectedRevision"
+        ],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+ARCHIVE_SLP_WORKSPACE_TOOL = {
+    "name": "archive_slp_workspace",
+    "title": "Archive a decided managed room",
+    "description": (
+        "Supervisor-only: after a digest-bound Human acceptance or abandonment, "
+        "archive the managed workspace with epoch/revision fencing."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "expectedWorkEpoch": {"type": "integer", "minimum": 1},
+            "expectedRevision": {"type": "integer", "minimum": 1},
+        },
+        "required": ["agentId", "expectedWorkEpoch", "expectedRevision"],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+RECOVER_WORKING_LEAD_TOOL = {
+    "name": "recover_working_lead",
+    "title": "Recover a stalled working Lead",
+    "description": (
+        "Supervisor-only recovery: resume the exact leased Lead while its managed "
+        "room is still WORKING after a lost callback. This cannot advance an epoch."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "prompt": {"type": "string", "minLength": 1},
+        },
+        "required": ["agentId", "prompt"],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+RECOVER_PEER_CALLBACKS_TOOL = {
+    "name": "recover_peer_callbacks",
+    "title": "Recover missing Peer callbacks",
+    "description": (
+        "Lead-only bounded recovery after an expected native Peer callback does "
+        "not render. Reads durable Paseo status/activity once, fences it to the "
+        "current managed epoch, and records a digest-deduplicated receipt."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+INSPECT_SLP_OWNERSHIP_TOOL = {
+    "name": "inspect_slp_ownership",
+    "title": "Inspect managed and legacy Lead ownership",
+    "description": (
+        "Supervisor-only diagnostic: reconcile workspace, parentage, and lease "
+        "authority for owned custom Lead records without trusting native idle state."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+RETIRE_LEGACY_LEAD_TOOL = {
+    "name": "retire_legacy_lead",
+    "title": "Retire a fenced legacy Lead",
+    "description": (
+        "Supervisor-only protected cleanup after Human-authorized replacement: "
+        "soft-archive an exact parent-owned custom Lead that is not the managed lease holder."
+    ),
+    "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "properties": {
+            "agentId": {"type": "string", "minLength": 1},
+            "workspaceId": {"type": "string", "minLength": 1},
+            "authorityDigest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+            },
+        },
+        "required": ["agentId", "workspaceId", "authorityDigest"],
+        "additionalProperties": False,
+    },
+    "execution": {"taskSupport": "forbidden"},
+}
+
+CUSTOM_LEAD_PROVIDERS = {"codex-lead", "claude-lead", "opencode-lead"}
+PEER_TERMINAL_OUTCOMES = {
+    "DONE",
+    "BLOCKED_PERMISSION",
+    "NEEDS_LEAD_DECISION",
+    "FAILED",
 }
 
 SUPERVISOR_BLOCKED_PREFIXES = ("browser_",)
@@ -78,7 +377,7 @@ def fail(message: str) -> None:
 def resolve_agent_id() -> str:
     direct = os.environ.get("PASEO_AGENT_ID", "").strip()
     if direct:
-        return direct
+        return direct if AGENT_ID_PATTERN.fullmatch(direct) else ""
 
     # Codex intentionally filters most parent environment variables before
     # launching stdio MCP servers. Paseo still places PASEO_AGENT_ID on the
@@ -89,6 +388,12 @@ def resolve_agent_id() -> str:
         if pid <= 1:
             break
         try:
+            owner = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "uid="], capture_output=True,
+                text=True, check=True, timeout=3,
+            ).stdout.strip()
+            if int(owner) != os.getuid():
+                break
             process = subprocess.run(
                 ["ps", "eww", "-p", str(pid), "-o", "command="],
                 capture_output=True,
@@ -98,7 +403,8 @@ def resolve_agent_id() -> str:
             )
             match = re.search(r"(?:^|\s)PASEO_AGENT_ID=([^\s]+)", process.stdout)
             if match:
-                return match.group(1)
+                value = match.group(1)
+                return value if AGENT_ID_PATTERN.fullmatch(value) else ""
             parent = subprocess.run(
                 ["ps", "-p", str(pid), "-o", "ppid="],
                 capture_output=True,
@@ -190,8 +496,1261 @@ def load_agent_record(agent_id: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) and value.get("id") == agent_id else None
 
 
-def upstream_call(agent_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-    url = f"{UPSTREAM}?callerAgentId={agent_id}"
+def agent_record_status(agent_id: str) -> tuple[str, dict[str, Any] | None]:
+    record = load_agent_record(agent_id)
+    if isinstance(record, dict):
+        return ("archived" if record.get("archivedAt") else "active"), record
+    if not AGENT_ID_PATTERN.fullmatch(agent_id):
+        return "missing", None
+    matches = list(AGENTS_ROOT.glob(f"*/{agent_id}.json"))
+    return ("unreadable" if matches else "missing"), None
+
+
+def iter_agent_records() -> list[dict[str, Any]]:
+    records = []
+    for path in sorted(AGENTS_ROOT.glob("*/*.json")):
+        try:
+            value = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(value, dict)
+            and isinstance(value.get("id"), str)
+            and AGENT_ID_PATTERN.fullmatch(value["id"])
+        ):
+            records.append(value)
+    return records
+
+
+def workspace_lifecycle(workspace_id: str) -> str:
+    try:
+        records = json.loads(WORKSPACES_PATH.read_text())
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return "unreadable"
+    if not isinstance(records, list):
+        return "unreadable"
+    for record in records:
+        if isinstance(record, dict) and record.get("workspaceId") == workspace_id:
+            return "archived" if record.get("archivedAt") else "active"
+    return "missing"
+
+
+def structured_content(response: Any) -> dict[str, Any] | None:
+    if not isinstance(response, dict):
+        return None
+    result = response.get("result")
+    if not isinstance(result, dict) or result.get("isError") is True:
+        return None
+    value = result.get("structuredContent")
+    return value if isinstance(value, dict) else None
+
+
+def digest_payload(value: Any) -> str:
+    payload = json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def write_json_atomic(path: pathlib.Path, value: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(value, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+
+
+def utc_timestamp() -> str:
+    return dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+
+
+def append_history(
+    lease: dict[str, Any],
+    operation: str,
+    actor_id: str,
+    authority_class: str,
+    correlation_id: str,
+    result: str,
+) -> None:
+    """Append evidence only; the lease registry remains lifecycle authority."""
+    event = {
+        "work_epoch": lease.get("work_epoch"),
+        "revision": lease.get("revision"),
+        "operation": operation,
+        "actor_id": actor_id,
+        "authority_class": authority_class,
+        "timestamp": utc_timestamp(),
+        "correlation_id": correlation_id,
+        "result": result,
+        "uncertain": result == "UNCERTAIN",
+    }
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    data = (json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n").encode()
+    descriptor = os.open(HISTORY_PATH, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        written = os.write(descriptor, data)
+        if written != len(data):
+            raise OSError("short append to SLP decision history")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def evidence_digest(epoch: int, message: str) -> str:
+    payload = json.dumps(
+        {"handback_message": message, "work_epoch": epoch},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def normalize_lease_revision(lease: dict[str, Any]) -> int:
+    revision = lease.get("revision", 1)
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+        raise RuntimeError("Managed lease revision is invalid; failing closed")
+    lease["revision"] = revision
+    return revision
+
+
+def bump_revision(lease: dict[str, Any]) -> int:
+    revision = normalize_lease_revision(lease) + 1
+    lease["revision"] = revision
+    return revision
+
+
+def expected_version_matches(
+    lease: dict[str, Any], expected_epoch: Any, expected_revision: Any
+) -> bool:
+    return (
+        type(expected_epoch) is int
+        and type(expected_revision) is int
+        and lease.get("work_epoch") == expected_epoch
+        and normalize_lease_revision(lease) == expected_revision
+    )
+
+
+def reserve_prior_evidence(lease: dict[str, Any]) -> None:
+    for key in ("candidate_digest", "candidate_reviews"):
+        if key in lease:
+            lease["prior_" + key] = lease.pop(key)
+    if "evidence_digest" in lease:
+        lease["prior_evidence_digest"] = lease.pop("evidence_digest")
+    if "legacy_evidence_missing" in lease:
+        lease["prior_legacy_evidence_missing"] = lease.pop("legacy_evidence_missing")
+
+
+def restore_prior_evidence(lease: dict[str, Any]) -> None:
+    for key in ("candidate_digest", "candidate_reviews"):
+        if "prior_" + key in lease:
+            lease[key] = lease.pop("prior_" + key)
+    if "prior_evidence_digest" in lease:
+        lease["evidence_digest"] = lease.pop("prior_evidence_digest")
+    if "prior_legacy_evidence_missing" in lease:
+        lease["legacy_evidence_missing"] = lease.pop("prior_legacy_evidence_missing")
+
+
+def discard_prior_evidence(lease: dict[str, Any]) -> None:
+    for key in ("candidate_digest", "candidate_reviews"):
+        lease.pop("prior_" + key, None)
+    lease.pop("prior_evidence_digest", None)
+    lease.pop("prior_legacy_evidence_missing", None)
+
+
+def validate_lease_entry(workspace_id: Any, lease: Any) -> dict[str, Any]:
+    if not isinstance(workspace_id, str) or not workspace_id:
+        raise RuntimeError("Lead lease registry has an invalid workspace key; failing closed")
+    if not isinstance(lease, dict):
+        raise RuntimeError(f"Lead lease {workspace_id} is not an object; failing closed")
+    stored_workspace = lease.get("workspace_id")
+    if stored_workspace is not None and stored_workspace != workspace_id:
+        raise RuntimeError(f"Lead lease {workspace_id} has mismatched workspace authority")
+    state = lease.get("state")
+    if state is not None and not isinstance(state, str):
+        raise RuntimeError(f"Lead lease {workspace_id} has invalid state; failing closed")
+    normalize_lease_revision(lease)
+    return lease
+
+
+@contextlib.contextmanager
+def locked_leases():
+    LEASES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = LEASES_PATH.with_suffix(LEASES_PATH.suffix + ".lock")
+    with lock_path.open("a+") as lock_stream:
+        fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            try:
+                value = json.loads(LEASES_PATH.read_text())
+            except FileNotFoundError:
+                value = {"version": 2, "leases": {}}
+            except (OSError, json.JSONDecodeError) as error:
+                raise RuntimeError("Lead lease registry is unreadable; failing closed") from error
+            if not isinstance(value, dict):
+                raise RuntimeError("Lead lease registry is not an object; failing closed")
+            old_version = value.get("version", 1)
+            value["version"] = 2
+            if not isinstance(value.get("leases"), dict):
+                raise RuntimeError("Lead lease registry has invalid leases; failing closed")
+            for workspace_id, lease in value["leases"].items():
+                validate_lease_entry(workspace_id, lease)
+            if isinstance(old_version, int) and old_version < 2:
+                for lease in value["leases"].values():
+                    lease.setdefault("room_kind", "managed_slp")
+                    lease.setdefault("work_epoch", 1)
+                    lease.setdefault("handback_epoch", 0)
+                    lease.setdefault("decision_state", "WORKING")
+                    lease.setdefault("legacy_epoch_unknown", True)
+            for lease in value["leases"].values():
+                normalize_lease_revision(lease)
+            yield value
+            write_json_atomic(LEASES_PATH, value)
+        finally:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+
+
+@contextlib.contextmanager
+def read_locked_leases():
+    """Read a current registry under the writer's lock without touching its bytes."""
+    lock_path = LEASES_PATH.with_suffix(LEASES_PATH.suffix + ".lock")
+    try:
+        with lock_path.open("r") as lock_stream:
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_SH)
+            try:
+                value = json.loads(LEASES_PATH.read_text())
+                if (
+                    not isinstance(value, dict)
+                    or value.get("version") != 2
+                    or not isinstance(value.get("leases"), dict)
+                ):
+                    raise RuntimeError("Lead lease registry requires current version 2 shape")
+                for workspace_id, lease in value["leases"].items():
+                    if (
+                        not isinstance(workspace_id, str) or not workspace_id
+                        or not isinstance(lease, dict)
+                        or lease.get("workspace_id") != workspace_id
+                        or lease.get("room_kind") != "managed_slp"
+                        or lease.get("state") not in {"active", "released"}
+                        or type(lease.get("work_epoch")) is not int
+                        or lease["work_epoch"] < 1
+                        or type(lease.get("revision")) is not int
+                        or lease["revision"] < 1
+                        or not isinstance(lease.get("decision_state"), str)
+                    ):
+                        raise RuntimeError("Lead lease registry contains a legacy or invalid entry")
+                yield value
+            finally:
+                fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+    except (FileNotFoundError, OSError, json.JSONDecodeError) as error:
+        raise RuntimeError("Lead lease registry is unreadable; failing closed") from error
+
+
+def lead_lease(registry: dict[str, Any], lead_id: str) -> dict[str, Any] | None:
+    for lease in registry["leases"].values():
+        if (
+            isinstance(lease, dict)
+            and lease.get("state") == "active"
+            and lease.get("lead_agent_id") == lead_id
+            and lease.get("room_kind") == "managed_slp"
+        ):
+            return lease
+    return None
+
+
+def bind_root_lead(lead_id: str, supervisor_id: str | None, task_class: str, *, apply: bool = False, execution_mode: str | None = None) -> dict[str, Any]:
+    """Human adoption, never agent creation or reparenting."""
+    lead = load_agent_record(lead_id)
+    if not lead or lead.get("archivedAt") or lead.get("provider") not in CUSTOM_LEAD_PROVIDERS:
+        raise workflow.WorkflowError("Binding requires an active role-aware Lead provider")
+    labels = lead.get("labels", {})
+    if not isinstance(labels, dict) or labels.get("paseo.parent-agent-id") or labels.get("role", "lead") != "lead":
+        raise workflow.WorkflowError("Human binding requires a root Lead; existing parentage is never changed")
+    if supervisor_id:
+        observer = load_agent_record(supervisor_id)
+        if not observer or observer.get("archivedAt") or observer.get("labels", {}).get("role") != "supervisor":
+            raise workflow.WorkflowError("Governance binding requires an active Supervisor")
+    workspace_id = lead.get("workspaceId")
+    if not isinstance(workspace_id, str) or workspace_lifecycle(workspace_id) != "active":
+        raise workflow.WorkflowError("Binding requires active workspace authority")
+    mode = execution_mode or ("SLP" if supervisor_id else "LP")
+    if mode not in {"L", "LP", "SLP"} or (mode == "SLP") != bool(supervisor_id):
+        raise workflow.WorkflowError("L/LP require direct Human authority; SLP requires a bound Supervisor")
+    canonical = dict(labels, role="lead", room_kind="managed_slp", work_epoch="1", task_state="LEASED")
+    canonical.setdefault("stack_profile", "budget" if lead["provider"] == "opencode-lead" else "standard")
+    prospective = {**lead, "labels": canonical}
+    lease = {"state": "active", "room_kind": "managed_slp", "workspace_id": workspace_id,
+             "lead_agent_id": lead_id, "supervisor_agent_id": supervisor_id,
+             "authority_mode": "observed" if supervisor_id else "direct",
+             "task_class": task_class, "work_epoch": 1, "handback_epoch": 0,
+             "execution_mode": mode,
+             "revision": 1, "decision_state": "WORKING", "bound_by": "human",
+             "runtime_binding_version": workflow.RUNTIME_BINDING_VERSION}
+    _, _, gate = workflow.verify_context(lease, prospective, pin=True)
+    if mode == "L" and (not gate["lead_self_work"] or gate["independent_review"]):
+        raise workflow.WorkflowError("L mode cannot weaken repository delegation or review gates")
+    def check(registry: dict[str, Any]) -> None:
+        if any(item.get("state") in {"active", "pending"} and item.get("lead_agent_id") == lead_id
+               for item in registry["leases"].values()):
+            raise workflow.WorkflowError("Lead already holds an active binding or reservation")
+        old = registry["leases"].get(workspace_id)
+        if old and old.get("state") in {"active", "pending"}:
+            raise workflow.WorkflowError("Workspace already has a Lead binding or reservation")
+        if old and old.get("lead_agent_id") == lead_id:
+            epoch = old.get("work_epoch")
+            if type(epoch) is not int or epoch < 1:
+                raise workflow.WorkflowError("Previous binding epoch is invalid")
+            lease["work_epoch"] = epoch + 1
+            canonical["work_epoch"] = str(epoch + 1)
+        for record in iter_agent_records():
+            if record.get("workspaceId") == workspace_id and record.get("id") != lead_id and not record.get("archivedAt"):
+                if record.get("provider") in CUSTOM_LEAD_PROVIDERS or record.get("labels", {}).get("role") == "lead":
+                    raise workflow.WorkflowError("Workspace already has another unarchived Lead")
+    if not apply:
+        try:
+            registry = json.loads(LEASES_PATH.read_text())
+        except FileNotFoundError:
+            registry = {"version": 2, "leases": {}}
+        if not isinstance(registry, dict) or not isinstance(registry.get("leases"), dict):
+            raise workflow.WorkflowError("Lead registry is malformed")
+        for key, value in registry["leases"].items():
+            validate_lease_entry(key, value)
+        check(registry)
+        return {"applied": False, "binding": lease}
+    with locked_leases() as registry:
+        check(registry)
+        response = update_labels(lead_id, canonical, "human-binding", caller_id="human")
+        if response_is_error(response) or response is None:
+            raise workflow.WorkflowError("Lead label update failed or is uncertain; no binding was granted")
+        lease["bound_at"] = utc_timestamp()
+        append_history(lease, "BIND_AUTHORITY", "human", "HUMAN", uuid.uuid4().hex, "BOUND")
+        registry["leases"][workspace_id] = lease
+    return {"applied": True, "binding": lease}
+
+
+def rebind_runtime(arguments: dict[str, Any], *, apply: bool = False, role: str = "human") -> dict[str, Any]:
+    """Owner-shell checkpoint operation; never infer acceptance or rewrite proof."""
+    required = {"agentId", "expectedWorkEpoch", "expectedRevision", "runtimeBindingDigest", "evidence"}
+    if role != "human" or set(arguments) != required or not isinstance(arguments["evidence"], str) or not arguments["evidence"].strip():
+        raise workflow.WorkflowError("Runtime rebind requires Human authority and exact checkpoint evidence")
+    def prepare(registry):
+        lease = lead_lease(registry, arguments["agentId"])
+        if not lease or not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            raise workflow.WorkflowError("Runtime rebind has stale epoch or revision")
+        lead = load_agent_record(arguments["agentId"])
+        if not lead or not workflow.lead_matches(lease, lead) or workspace_lifecycle(lease["workspace_id"]) != "active":
+            raise workflow.WorkflowError("Runtime rebind requires unchanged active authority")
+        if lease.get("decision_state") != "HANDBACK_READY" or lease.get("handback_epoch") != lease["work_epoch"]:
+            raise workflow.WorkflowError("Runtime rebind requires a handback checkpoint")
+        if lead.get("lastStatus") != "idle":
+            raise workflow.WorkflowError("Runtime rebind requires an idle native Lead record")
+        if pending_steering(lease) or any(not peer.get("archivedAt") and peer.get("labels", {}).get("paseo.parent-agent-id") == lead["id"] for peer in iter_agent_records()):
+            raise workflow.WorkflowError("Runtime rebind requires settled and archived descendants")
+        state = tasks.epoch_state(lease)
+        if any(task.get("state") not in {"ACCEPTED", "CANCELLED"} for task in state["tasks"].values()):
+            raise workflow.WorkflowError("Runtime rebind requires settled tasks")
+        if any(check.get("state") == "RUNNING" for check in state["checks"].values()):
+            raise workflow.WorkflowError("Runtime rebind requires quiescent checks")
+        # Preserve repository/protocol authority, but explicitly replace the
+        # acknowledged runtime pin after checking its current digest below.
+        proposed = dict(lease, runtime_binding_version=workflow.RUNTIME_BINDING_VERSION)
+        proposed.pop("runtime_binding", None)
+        workflow.verify_context(proposed, lead, pin=True)
+        binding = proposed["runtime_binding"]
+        return lease, binding, workflow.digest(binding)
+    manager = locked_leases if apply else read_locked_leases
+    with manager() as registry:
+        lease, binding, fingerprint = prepare(registry)
+        if arguments["runtimeBindingDigest"] != fingerprint:
+            if apply:
+                raise workflow.WorkflowError("Runtime rebind digest changed or was not approved")
+            return {"applied": False, "runtimeBindingDigest": fingerprint, "runtimeBinding": binding, "approvalMatches": False}
+        if apply:
+            previous = {"version": workflow.binding_version(lease), "binding": lease.get("runtime_binding")}
+            lease.update(runtime_binding_version=workflow.RUNTIME_BINDING_VERSION, runtime_binding=binding)
+            lease.setdefault("runtime_rebindings", []).append({"previous_digest": workflow.digest(previous), "binding_digest": fingerprint, "epoch": lease["work_epoch"], "evidence": arguments["evidence"], "actor": "human", "at": utc_timestamp()})
+            bump_revision(lease)
+            append_history(lease, "REBIND_RUNTIME", "human", "HUMAN", uuid.uuid4().hex, "REBOUND")
+        return {"applied": apply, "runtimeBindingDigest": fingerprint, "runtimeBinding": binding, "approvalMatches": True}
+
+
+def withdraw_binding(arguments: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
+    required = {"agentId", "expectedWorkEpoch", "expectedRevision", "settlementEvidence"}
+    if set(arguments) != required or not isinstance(arguments["settlementEvidence"], str) or not arguments["settlementEvidence"].strip():
+        raise workflow.WorkflowError("Withdrawal requires exact epoch/revision and settlementEvidence")
+    if not apply:
+        return {"applied": False, "operation": "withdraw", "arguments": arguments}
+    with locked_leases() as registry:
+        lease = lead_lease(registry, arguments["agentId"])
+        if not lease or not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            raise workflow.WorkflowError("Withdrawal has a stale authority binding")
+        if lease.get("decision_state") not in {"WORKING", "HANDBACK_READY"}:
+            raise workflow.WorkflowError("Resolve uncertain delivery before withdrawing authority")
+        if pending_steering(lease):
+            raise workflow.WorkflowError("Resolve or cancel pending Peer steering before withdrawing authority")
+        if any(not peer.get("archivedAt") and peer.get("labels", {}).get("paseo.parent-agent-id") == arguments["agentId"] for peer in iter_agent_records()):
+            raise workflow.WorkflowError("Settle and archive existing descendants before withdrawing authority")
+        lease["state"] = "released"
+        lease["decision_state"] = "WITHDRAWN"
+        lease["released_at"] = utc_timestamp()
+        lease["settlement_evidence"] = arguments["settlementEvidence"]
+        bump_revision(lease)
+        append_history(lease, "WITHDRAW_AUTHORITY", "human", "HUMAN", uuid.uuid4().hex, "WITHDRAWN")
+    return {"applied": True, "binding": lease}
+
+
+def verify_candidate(lease: dict[str, Any], lead: dict[str, Any], supplied: Any = None) -> str | None:
+    root, policy, gate = workflow.verify_context(lease, lead, pin=True)
+    if not gate["candidate"]:
+        return None
+    if root is None:
+        raise workflow.WorkflowError("Candidate-bound work requires repository placement")
+    current = workflow.snapshot(root)["digest"]
+    expected = supplied if supplied is not None else lease.get("candidate_digest")
+    if current != expected:
+        raise workflow.WorkflowError("Candidate changed or digest is missing; inspect and verify the exact candidate again")
+    if gate["independent_review"]:
+        reviews = lease.get("candidate_reviews", {})
+        if not isinstance(reviews, dict) or not any(
+            review.get("candidate_digest") == current and review.get("verdict") == "APPROVE"
+            and review.get("work_epoch") == lease.get("work_epoch")
+            for review in reviews.values() if isinstance(review, dict)
+        ):
+            raise workflow.WorkflowError("This task class requires an independent review of this exact candidate")
+        if any(review.get("candidate_digest") == current and review.get("verdict") == "FINDINGS"
+               and review.get("work_epoch") == lease.get("work_epoch")
+               for review in reviews.values() if isinstance(review, dict)):
+            raise workflow.WorkflowError("Unresolved review findings remain on this candidate")
+    return current
+
+
+def inspect_work_context(agent_id: str, role: str, request_id: Any, arguments: dict[str, Any], *, candidate: bool = False) -> dict[str, Any]:
+    if role != "lead" or arguments:
+        return denied_tool_result(request_id, "only Lead may inspect its own context without arguments")
+    lead = load_agent_record(agent_id)
+    with locked_leases() as registry:
+        lease = lead_lease(registry, agent_id)
+        if not lease or not lead:
+            return denied_tool_result(request_id, "caller has no active managed authority")
+        root, policy, gate = workflow.verify_context(lease, lead, pin=True)
+        result = {"authority_mode": lease.get("authority_mode", "parented"),
+                  "execution_mode": lease.get("execution_mode"),
+                  "work_epoch": lease["work_epoch"], "revision": lease["revision"], "task_class": lease["task_class"],
+                  "gates": gate, "workflow_digest": lease["workflow_digest"],
+                  "protocol_path": policy["protocol_path"] if policy else None}
+        if candidate:
+            if root is None:
+                return denied_tool_result(request_id, "candidate needs a repository cwd")
+            result["candidate"] = workflow.snapshot(root)
+    return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+
+
+def ensure_report_ask(lease: dict[str, Any], receipt: dict[str, Any]) -> bool:
+    """Backfill old receipts inside a writer transaction, including archived Peers."""
+    report = receipt.get("report")
+    if not isinstance(report, dict) or report.get("workEpoch") != lease["work_epoch"] or report.get("kind") not in {"DEPENDENCY_REQUEST", "REOPEN_REQUEST"}:
+        return False
+    if receipt.get("digest") != workflow.digest(report):
+        raise workflow.WorkflowError("Peer report evidence digest is inconsistent")
+    report_id = attention.bounded_text(report.get("reportId"), "reportId", 115)
+    payload = report["payload"]
+    question = payload.get("question", payload.get("evidence"))
+    if not isinstance(question, str) or not question.strip():
+        raise attention.AttentionError("report question must be non-empty text")
+    question = question.strip()
+    ask_id = "peer:" + report_id
+    _, created = attention.open_ask(
+        lease, ask_id=ask_id, question=question[:attention.MAX_QUESTION], sender=report["peerAgentId"],
+        sender_role="peer", recipient=lease["lead_agent_id"], work_epoch=lease["work_epoch"],
+        created_at=receipt["recorded_at"],
+    )
+    ask = lease["room_asks"][ask_id]
+    changed = (created or receipt.get("ask_id") != ask_id or ask.get("kind") != report["kind"]
+               or ask.get("report_id") != report_id or ask.get("question_truncated") != (len(question) > attention.MAX_QUESTION))
+    ask.update(kind=report["kind"], report_id=report_id, question_truncated=len(question) > attention.MAX_QUESTION)
+    receipt["ask_id"] = ask_id
+    return changed
+
+
+def task_authority(registry: dict, agent_id: str, arguments: dict) -> tuple[dict, dict, pathlib.Path, dict | None]:
+    lease = lead_lease(registry, agent_id)
+    lead = load_agent_record(agent_id)
+    if not lease or not lead or lease.get("decision_state") != "WORKING":
+        raise workflow.WorkflowError("Task operation requires the current working Lead authority")
+    if not expected_version_matches(lease, arguments.get("expectedWorkEpoch"), arguments.get("expectedRevision")):
+        raise workflow.WorkflowError("Task operation has stale epoch/revision")
+    root, policy, _ = workflow.verify_context(lease, lead, pin=True)
+    if root is None:
+        raise workflow.WorkflowError("Tasks require a pinned repository")
+    return lease, lead, root, policy
+
+
+def task_peer_quiescent(agent_id: str, request_id: Any, task: dict) -> None:
+    peer_id = task.get("peer_agent_id")
+    if not peer_id:
+        # Failed/uncertain creation can leave a reservation. Inspect any known
+        # record with its exact assignment before explicitly cancelling it.
+        peers = [record for record in iter_agent_records()
+                 if task.get("assignment_id") and record.get("labels", {}).get("assignment_id") == task["assignment_id"]]
+    else:
+        peer = load_agent_record(peer_id)
+        if peer is None:
+            raise workflow.WorkflowError("Cannot establish writer quiescence: Peer record is unavailable")
+        peers = [peer]
+    for peer in peers:
+        if peer.get("archivedAt"):
+            continue
+        response = upstream_tool_call(agent_id, request_id, "get_agent_status", {"agentId": peer["id"]})
+        payload = structured_content(response)
+        status = payload.get("status") if payload else None
+        if status is None and payload:
+            status = payload.get("snapshot", {}).get("status")
+        if status not in {"idle", "closed", "error"}:
+            raise workflow.WorkflowError("Quiesce the task Peer before releasing scope or recording checks")
+
+
+def work_task_operation(agent_id: str, role: str, request_id: Any, arguments: dict, operation: str) -> dict:
+    if role != "lead":
+        return denied_tool_result(request_id, "task engineering operations belong only to Lead")
+    tool = next(item for item in TASK_TOOLS if item["name"] == operation)
+    schema = tool["inputSchema"]
+    if set(arguments) - set(schema["properties"]) or not set(schema["required"]).issubset(arguments):
+        return denied_tool_result(request_id, "task operation requires its exact declared arguments")
+    if operation == "inspect_work_tasks":
+        with read_locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            lead = load_agent_record(agent_id)
+            if not lease or not lead:
+                return denied_tool_result(request_id, "caller has no active managed authority")
+            workflow.verify_context(lease, lead)
+            result = {"work_epoch": lease["work_epoch"], "revision": lease["revision"], **tasks.epoch_state(lease)}
+        return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+    if operation == "run_work_check":
+        return run_work_check(agent_id, request_id, arguments)
+    with locked_leases() as registry:
+        lease, lead, root, policy = task_authority(registry, agent_id, arguments)
+        if operation == "define_work_task":
+            # Do not introduce a ledger around already-dispatched unreserved writers.
+            if not tasks.epoch_state(lease)["tasks"]:
+                existing = [record for record in iter_agent_records()
+                            if not record.get("archivedAt") and record.get("labels", {}).get("paseo.parent-agent-id") == agent_id
+                            and record.get("labels", {}).get("work_epoch") == str(lease["work_epoch"])]
+                if existing:
+                    raise workflow.WorkflowError("Settle/archive existing Peers before enabling task reservations in this epoch")
+            result = tasks.define(lease, root, arguments, tasks.check_recipes(policy))
+        elif operation == "settle_work_task":
+            if arguments["writersQuiescent"] is not True:
+                raise workflow.WorkflowError("Explicit writer quiescence evidence is required")
+            task = tasks.epoch_state(lease)["tasks"].get(arguments["taskId"])
+            if not task:
+                raise workflow.WorkflowError("Unknown task")
+            task_peer_quiescent(agent_id, request_id, task)
+            candidate = None
+            if arguments["decision"] == "ACCEPTED":
+                candidate = workflow.snapshot(root)["digest"]
+                if arguments.get("candidateDigest") != candidate:
+                    raise workflow.WorkflowError("Task settlement requires this exact current candidate")
+            result = tasks.settle(lease, arguments["taskId"], arguments["decision"], arguments["evidence"], candidate)
+        else:
+            result = tasks.reopen(lease, arguments["taskId"], arguments["evidence"])
+        revision = bump_revision(lease)
+        append_history(lease, operation.upper(), agent_id, "LEAD", arguments["taskId"], "RECORDED")
+        result = {"work_epoch": lease["work_epoch"], "revision": revision, "result": result}
+    return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+
+
+def run_work_check(agent_id: str, request_id: Any, arguments: dict) -> dict:
+    run_id = uuid.uuid4().hex
+    with locked_leases() as registry:
+        lease, lead, root, policy = task_authority(registry, agent_id, arguments)
+        shelf = tasks.epoch_state(lease)
+        task = shelf["tasks"].get(arguments["taskId"])
+        recipe = tasks.check_recipes(policy).get(arguments["recipeId"])
+        if not task or task["state"] != "RUNNING" or not tasks.provenance_current(shelf["tasks"], task) or not recipe:
+            raise workflow.WorkflowError("Check requires a current running task and a pinned repository recipe")
+        task_peer_quiescent(agent_id, request_id, task)
+        if len(shelf["checks"]) >= 128 or any(check.get("state") == "RUNNING" for check in shelf["checks"].values()):
+            raise workflow.WorkflowError("Check already running or epoch check limit (128) reached")
+        before = workflow.snapshot(root)["digest"]
+        if arguments["candidateDigest"] != before:
+            raise workflow.WorkflowError("Check candidate is stale")
+        epoch = lease["work_epoch"]
+        receipt = {"run_id": run_id, "task_id": arguments["taskId"], "task_revision": task["revision"],
+                   "recipe_id": arguments["recipeId"], "recipe_digest": workflow.digest(recipe),
+                   "candidate_before": before, "state": "RUNNING", "work_epoch": epoch}
+        shelf["checks"][run_id] = receipt
+        reservation_revision = bump_revision(lease)
+    # Never hold the registry lock across the bounded command execution.
+    def record_process(pid: int) -> None:
+        nonlocal reservation_revision
+        with locked_leases() as registry:
+            current_lease = lead_lease(registry, agent_id)
+            if not current_lease or not expected_version_matches(current_lease, epoch, reservation_revision):
+                raise workflow.WorkflowError("Check authority changed before command startup")
+            current_receipt = tasks.epoch_state(current_lease)["checks"][run_id]
+            current_receipt["process_group_id"] = pid
+            reservation_revision = bump_revision(current_lease)
+    try:
+        execution = tasks.execute_check(root, recipe, record_process)
+    except (OSError, workflow.WorkflowError) as error:
+        execution = {"exit_code": None, "executor_error": str(error), "argv": recipe["argv"]}
+    try:
+        after = workflow.snapshot(root)["digest"]
+    except (workflow.WorkflowError, OSError) as error:
+        after = None
+        execution["candidate_error"] = str(error)
+    with locked_leases() as registry:
+        # Preserve an old-epoch receipt if authority changed during execution.
+        stored = registry["leases"].get(lease["workspace_id"])
+        old_shelf = stored.get("work_tasks", {}).get("epochs", {}).get(str(epoch)) if stored else None
+        if not old_shelf or run_id not in old_shelf["checks"]:
+            return denied_tool_result(request_id, "check authority was replaced; do not infer a passing receipt")
+        current = old_shelf["checks"][run_id]
+        active = lead_lease(registry, agent_id)
+        valid = active is stored and expected_version_matches(stored, epoch, reservation_revision)
+        if valid:
+            try:
+                workflow.verify_context(stored, load_agent_record(agent_id) or {})
+            except (workflow.WorkflowError, OSError):
+                valid = False
+        passed = valid and before == after and execution.get("exit_code") == 0 and execution.get("output_hash_complete") is True
+        current.update(execution, candidate_after=after, state="PASSED" if passed else "FAILED" if valid else "STALE")
+        revision = bump_revision(stored)
+        append_history(stored, "WORK_CHECK", agent_id, "LEAD", run_id, current["state"])
+        result = {"receipt": current, "revision": revision, "work_epoch": epoch}
+    return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+
+
+def resolve_work_check(arguments: dict, *, apply: bool = False) -> dict:
+    """Owner-shell resolution never turns an interrupted execution into proof."""
+    required = {"leadAgentId", "runId", "evidence", "writersQuiescent", "expectedWorkEpoch", "expectedRevision"}
+    if set(arguments) != required or arguments["writersQuiescent"] is not True:
+        raise workflow.WorkflowError("Check resolution requires exact identity/version and explicit quiescence evidence")
+    evidence = tasks.text(arguments["evidence"])
+    manager = locked_leases if apply else read_locked_leases
+    with manager() as registry:
+        lease, lead, root, policy = task_authority(registry, arguments["leadAgentId"], arguments)
+        receipt = tasks.epoch_state(lease)["checks"].get(arguments["runId"])
+        if not receipt or receipt.get("state") != "RUNNING":
+            raise workflow.WorkflowError("Only an interrupted RUNNING receipt requires owner resolution")
+        pid = receipt.get("process_group_id")
+        if pid:
+            try:
+                os.killpg(pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise workflow.WorkflowError("Check process group still exists; inspect and quiesce it before resolution")
+        if apply:
+            receipt.update(state="INTERRUPTED", resolution_evidence=evidence, output_hash_complete=False)
+            bump_revision(lease)
+            append_history(lease, "RESOLVE_WORK_CHECK", "human", "HUMAN", arguments["runId"], "INTERRUPTED")
+        return {"applied": apply, "run_id": arguments["runId"], "resolution": "INTERRUPTED", "revision": lease["revision"]}
+
+
+def record_peer_report(agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    if role != "lead" or set(arguments) != {"report"}:
+        return denied_tool_result(request_id, "only Lead may record a correlated Peer report")
+    report = arguments["report"]
+    lead = load_agent_record(agent_id)
+    peer_id = report.get("peerAgentId") if isinstance(report, dict) else None
+    peer = load_agent_record(peer_id) if isinstance(peer_id, str) else None
+    with locked_leases() as registry:
+        lease = lead_lease(registry, agent_id)
+        if not lease or not lead or lease.get("decision_state") != "WORKING":
+            return denied_tool_result(request_id, "report requires active Lead, Peer and working epoch")
+        root, _, _ = workflow.verify_context(lease, lead, pin=False)
+        correlation = None
+        if isinstance(report, dict) and "peerAgentId" in report and peer_id is None:
+            # The native callback supplies the report to the owning Lead. Only
+            # a durable post-create brief AND its matching native record may
+            # fill an unavailable self-ID. Wrong non-null IDs are never fixed.
+            briefs = lease.get("peer_briefs", {})
+            if not isinstance(briefs, dict):
+                raise workflow.WorkflowError("Canonical Peer briefs are invalid")
+            matches = []
+            for canonical_id, brief in briefs.items():
+                if (isinstance(brief, dict) and brief.get("assignment_id") == report.get("assignmentId")
+                    and brief.get("work_epoch") == report.get("workEpoch") == lease["work_epoch"]):
+                    record = load_agent_record(canonical_id)
+                    if record:
+                        try:
+                            workflow.validate_report(dict(report, peerAgentId=canonical_id), record, lead, lease["work_epoch"])
+                        except workflow.WorkflowError:
+                            continue
+                        matches.append(record)
+            if len(matches) != 1:
+                return denied_tool_result(request_id, "NEEDS_LEAD_DECISION: unavailable Peer identity has no unique canonical assignment")
+            peer = matches[0]
+            peer_id = peer["id"]
+            report = dict(report, peerAgentId=peer_id)
+            correlation = {"method": "canonical_creation_assignment", "reported_peer_agent_id": None, "peer_agent_id": peer_id}
+        if not peer:
+            return denied_tool_result(request_id, "report requires an active canonical Peer identity")
+        workflow.validate_report(report, peer, lead, lease["work_epoch"])
+        workflow.verify_context(lease, lead, pin=True)
+        receipts = lease.setdefault("peer_reports", {})
+        report_id = report["reportId"]
+        fingerprint = workflow.digest(report)
+        if report_id in receipts:
+            if receipts[report_id]["digest"] != fingerprint:
+                return denied_tool_result(request_id, "report identity already binds different evidence")
+            if ensure_report_ask(lease, receipts[report_id]):
+                bump_revision(lease)
+                append_history(lease, "PEER_REPORT", agent_id, "LEAD", report_id, "ASK_BACKFILLED")
+            return text_tool_result(request_id, json.dumps(receipts[report_id], sort_keys=True))
+        if report["kind"] == "REVIEW":
+            if root is None or workflow.snapshot(root)["digest"] != report["payload"]["candidateDigest"]:
+                return denied_tool_result(request_id, "review is stale or does not identify this repository candidate")
+            lease.setdefault("candidate_reviews", {})[peer_id] = {
+                "candidate_digest": report["payload"]["candidateDigest"],
+                "verdict": report["payload"]["verdict"], "work_epoch": lease["work_epoch"],
+                "report_id": report_id, "evidence": report["payload"]["evidence"],
+            }
+        receipt = {"digest": fingerprint, "report": report, "recorded_at": utc_timestamp()}
+        if correlation:
+            receipt["identity_correlation"] = correlation
+        ensure_report_ask(lease, receipt)
+        receipts[report_id] = receipt
+        bump_revision(lease)
+        append_history(lease, "PEER_REPORT", agent_id, "LEAD", report_id, "RECORDED")
+    return text_tool_result(request_id, json.dumps(receipt, sort_keys=True))
+
+
+def resolve_peer_report(agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    required = {"reportId", "outcome", "decision", "evidence", "nextAction", "changesWork", "expectedWorkEpoch", "expectedRevision"}
+    if role != "lead":
+        return denied_tool_result(request_id, "only the owning Lead may resolve a Peer report")
+    if not required <= set(arguments) or set(arguments) - required - {"candidateDigest", "owner", "checkpoint"}:
+        return error_response(request_id, -32602, "resolution requires outcome, decision, evidence, nextAction and exact epoch/revision")
+    attention.bounded_text(arguments["reportId"], "reportId", 115)
+    resolution = {key: arguments[key] for key in ("outcome", "changesWork")}
+    if not isinstance(resolution["outcome"], str) or resolution["outcome"] not in attention.RESOLUTION_OUTCOMES or type(resolution["changesWork"]) is not bool:
+        return error_response(request_id, -32602, "invalid resolution outcome or changesWork")
+    for key in ("decision", "evidence", "nextAction"):
+        resolution[key] = attention.bounded_text(arguments[key], key, 4000)
+    if resolution["outcome"] != "RESOLVED_BY_LEAD":
+        for key in ("owner", "checkpoint"):
+            resolution[key] = attention.bounded_text(arguments.get(key), key, 2000)
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, agent_id, agent_id, role)
+        if authority is None:
+            return denied_tool_result(request_id, "resolution requires an active working Lead binding")
+        lease, lead = authority
+        receipt = lease.get("peer_reports", {}).get(arguments["reportId"])
+        report = receipt.get("report") if isinstance(receipt, dict) else None
+        if not isinstance(report, dict) or report.get("kind") != "REOPEN_REQUEST" or report.get("workEpoch") != lease["work_epoch"] or report.get("reportId") != arguments["reportId"]:
+            return denied_tool_result(request_id, "resolution must identify a current correlated REOPEN_REQUEST")
+        legacy = receipt.get("ask_id") is None
+        ask = ({"kind": "REOPEN_REQUEST", "status": "OPEN", "work_epoch": lease["work_epoch"]}
+               if legacy else attention.asks_for(lease).get(receipt.get("ask_id")))
+        if not ask or ask.get("kind") != "REOPEN_REQUEST" or ask["work_epoch"] != lease["work_epoch"]:
+            return denied_tool_result(request_id, "resolution must identify a current correlated REOPEN_REQUEST")
+        if resolution["changesWork"]:
+            root = workflow.repository_for(lead, lease)
+            if root is None or workflow.snapshot(root)["digest"] != arguments.get("candidateDigest"):
+                return denied_tool_result(request_id, "changed work requires evidence bound to the current candidate")
+            resolution["candidateDigest"] = arguments["candidateDigest"]
+        elif "candidateDigest" in arguments:
+            return error_response(request_id, -32602, "candidateDigest applies only when changesWork is true")
+        prior = ask.get("resolution")
+        if prior and all(prior.get(key) == value for key, value in resolution.items()) and prior.get("resolved_by") == agent_id:
+            if type(arguments["expectedWorkEpoch"]) is not int or arguments["expectedWorkEpoch"] != lease["work_epoch"]:
+                return denied_tool_result(request_id, "stale resolution epoch")
+            return text_tool_result(request_id, json.dumps({"ask": ask, "changed": False}, sort_keys=True))
+        if not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            return denied_tool_result(request_id, "stale resolution epoch/revision")
+        reverified = (prior and prior.get("outcome") == "RESOLVED_BY_LEAD"
+                      and resolution["outcome"] == "RESOLVED_BY_LEAD"
+                      and resolution["decision"] == prior.get("decision")
+                      and resolution["changesWork"] and prior.get("candidateDigest") != resolution.get("candidateDigest"))
+        if ask["status"] == "ANSWERED" and not reverified:
+            return denied_tool_result(request_id, "closed dissent cannot be silently replaced; record new evidence as a new report")
+        if legacy:
+            ensure_report_ask(lease, receipt)
+            ask = lease["room_asks"][receipt["ask_id"]]
+            append_history(lease, "PEER_REPORT", agent_id, "LEAD", arguments["reportId"], "ASK_BACKFILLED")
+        resolution.update(resolved_by=agent_id, resolved_at=utc_timestamp())
+        ask["resolution"] = resolution
+        if resolution["outcome"] == "RESOLVED_BY_LEAD":
+            ask.update(status="ANSWERED", answer=resolution["decision"], answered_by=agent_id, answered_at=resolution["resolved_at"])
+        bump_revision(lease)
+        append_history(lease, "PEER_RESOLUTION", agent_id, "LEAD", arguments["reportId"], resolution["outcome"])
+        return text_tool_result(request_id, json.dumps({"ask": ask, "changed": True}, sort_keys=True))
+
+
+def list_room_observations(agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    if set(arguments) != {"leadAgentId"} or not isinstance(arguments["leadAgentId"], str):
+        return error_response(request_id, -32602, "observations require leadAgentId")
+    with read_locked_leases() as registry:
+        authority = _attention_authority(registry, arguments["leadAgentId"], agent_id, role, require_working=False)
+        if authority is None:
+            return denied_tool_result(request_id, "caller has no room observation authority")
+        lease, _ = authority
+        steering_grants(lease)
+        result = {"work_epoch": lease["work_epoch"], "revision": lease["revision"], **attention.observations_for(lease)}
+    return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+
+
+STEERING_STATES = {"AUTHORIZED", "NOTICE_SENDING", "NOTICE_DELIVERED", "PEER_SENDING", "DELIVERED", "REJECTED", "UNCERTAIN", "CANCELLED"}
+
+
+def steering_grants(lease: dict[str, Any]) -> dict[str, Any]:
+    grants = lease.get("peer_steering", {})
+    if not isinstance(grants, dict) or len(grants) > 64:
+        raise workflow.WorkflowError("steering grant registry is invalid or over capacity")
+    for key, item in grants.items():
+        if (not isinstance(key, str) or not isinstance(item, dict)
+            or item.get("state") not in STEERING_STATES or type(item.get("work_epoch")) is not int
+            or item.get("authorized_by") != "human" or type(item.get("authorized_revision")) is not int
+            or not isinstance(item.get("authority"), dict)
+            or set(item["authority"]) != {"disposition", "write_mode"}
+            or any(not isinstance(item.get(field), str) or not item[field]
+                   for field in ("peer_agent_id", "assignment_id", "prompt", "human_instruction", "digest"))):
+            raise workflow.WorkflowError("steering grant record is invalid")
+        bound = {field: item[field] for field in ("peer_agent_id", "assignment_id", "prompt", "human_instruction", "work_epoch", "authority")}
+        if item["digest"] != digest_payload(bound):
+            raise workflow.WorkflowError("steering grant instruction digest is inconsistent")
+        if item["state"] in {"NOTICE_SENDING", "PEER_SENDING", "UNCERTAIN"} and item.get("stage") not in {"NOTICE", "PEER"}:
+            raise workflow.WorkflowError("steering delivery stage is invalid")
+    return grants
+
+
+def pending_steering(lease: dict[str, Any]) -> list[str]:
+    return [key for key, item in steering_grants(lease).items()
+            if item["work_epoch"] == lease["work_epoch"]
+            and item["state"] not in {"DELIVERED", "REJECTED", "CANCELLED"}]
+
+
+def steering_peer(lease: dict[str, Any], grant: dict[str, Any]) -> dict[str, Any]:
+    peer = load_agent_record(grant["peer_agent_id"])
+    labels = peer.get("labels") if isinstance(peer, dict) else None
+    if (not peer or peer.get("archivedAt") is not None or peer.get("workspaceId") != lease["workspace_id"]
+        or not isinstance(labels, dict) or labels.get("role") != "peer"
+        or labels.get("room_kind") != "managed_slp"
+        or labels.get("paseo.parent-agent-id") != lease["lead_agent_id"]
+        or labels.get("work_epoch") != str(lease["work_epoch"])
+        or labels.get("assignment_id") != grant["assignment_id"]
+        or {key: labels.get(key) for key in ("disposition", "write_mode")} != grant["authority"]):
+        raise workflow.WorkflowError("steering Peer assignment, ownership or authority drifted")
+    tasks.require_peer_current(lease, labels)
+    return peer
+
+
+def verify_steering_context(lease: dict[str, Any], lead: dict[str, Any]) -> None:
+    workflow.verify_context(lease, lead, pin=True)
+    labels = lead.get("labels", {})
+    if labels.get("room_kind") != "managed_slp" or labels.get("work_epoch") != str(lease["work_epoch"]):
+        raise workflow.WorkflowError("steering Lead epoch authority drifted")
+
+
+def authorize_peer_steering(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Owner-shell only; deliberately absent from the agent tool catalog."""
+    if os.environ.get("PASEO_ROOM_ROLE"):
+        raise workflow.WorkflowError("steering authorization requires an ordinary Human owner shell")
+    required = {"leadAgentId", "peerAgentId", "assignmentId", "grantId", "prompt", "humanInstruction", "expectedWorkEpoch", "expectedRevision"}
+    if set(arguments) != required:
+        raise workflow.WorkflowError("steering grant requires exact Lead, Peer, assignment, Human instruction, prompt and epoch/revision")
+    attention.bounded_text(arguments["leadAgentId"], "leadAgentId", 120)
+    grant_id = attention.bounded_text(arguments["grantId"], "grantId", 120)
+    grant = {"peer_agent_id": attention.bounded_text(arguments["peerAgentId"], "peerAgentId", 120),
+             "assignment_id": attention.bounded_text(arguments["assignmentId"], "assignmentId", 120),
+             "prompt": attention.bounded_text(arguments["prompt"], "prompt", 4000),
+             "human_instruction": attention.bounded_text(arguments["humanInstruction"], "humanInstruction", 2000)}
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, arguments["leadAgentId"], "human", "human")
+        if authority is None:
+            raise workflow.WorkflowError("Human steering needs an active working room")
+        lease, lead = authority
+        verify_steering_context(lease, lead)
+        grant["work_epoch"] = lease["work_epoch"]
+        peer = load_agent_record(grant["peer_agent_id"])
+        labels = peer.get("labels", {}) if peer else {}
+        grant["authority"] = {key: labels.get(key) for key in ("disposition", "write_mode")}
+        steering_peer(lease, grant)
+        grants = steering_grants(lease)
+        fingerprint = digest_payload(grant)
+        existing = grants.get(grant_id)
+        if existing:
+            if type(arguments["expectedWorkEpoch"]) is not int or arguments["expectedWorkEpoch"] != lease["work_epoch"] or existing["digest"] != fingerprint:
+                raise workflow.WorkflowError("steering grant identity already binds different instruction or epoch")
+            return {"grantId": grant_id, "grant": existing, "created": False}
+        if not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            raise workflow.WorkflowError("stale steering grant epoch/revision")
+        if len(grants) >= 64:
+            raise workflow.WorkflowError("steering grant registry is at capacity")
+        grant.update(digest=fingerprint, state="AUTHORIZED", authorized_at=utc_timestamp(), authorized_by="human")
+        lease.setdefault("peer_steering", grants)[grant_id] = grant
+        grant["authorized_revision"] = bump_revision(lease)
+        append_history(lease, "PEER_STEERING", "human", "HUMAN", grant_id, "AUTHORIZED")
+        return {"grantId": grant_id, "grant": grant, "created": True}
+
+
+def steer_room_peer(agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]) -> dict[str, Any]:
+    if role not in {"supervisor", "human"} or set(arguments) != {"leadAgentId", "grantId", "expectedWorkEpoch", "expectedRevision"}:
+        return denied_tool_result(request_id, "steering requires bound governance and an exact Human grant")
+    lead_id, grant_id = arguments["leadAgentId"], arguments["grantId"]
+    attention.bounded_text(lead_id, "leadAgentId", 120)
+    attention.bounded_text(grant_id, "grantId", 120)
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, lead_id, agent_id, role)
+        if authority is None:
+            return denied_tool_result(request_id, "no current governance binding for steering")
+        lease, lead = authority
+        verify_steering_context(lease, lead)
+        grant = steering_grants(lease).get(grant_id)
+        if not grant or grant["work_epoch"] != lease["work_epoch"]:
+            return denied_tool_result(request_id, "Human steering grant is absent or stale")
+        steering_peer(lease, grant)
+        if grant["state"] == "DELIVERED":
+            if type(arguments["expectedWorkEpoch"]) is not int or arguments["expectedWorkEpoch"] != lease["work_epoch"]:
+                return denied_tool_result(request_id, "stale steering epoch")
+            return text_tool_result(request_id, json.dumps({"grantId": grant_id, "state": "DELIVERED", "duplicate": True}))
+        if not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            return denied_tool_result(request_id, "stale steering epoch/revision")
+        if grant["state"] not in {"AUTHORIZED", "NOTICE_DELIVERED"}:
+            return denied_tool_result(request_id, "steering cannot be retried; Human must resolve uncertain delivery or issue a new grant")
+        if grant["state"] == "AUTHORIZED" and grant["authorized_revision"] != lease["revision"]:
+            return denied_tool_result(request_id, "room changed after authorization; Human must issue a new grant")
+        epoch = lease["work_epoch"]
+
+    # Lead sees the exact planned intervention before the Peer is contacted.
+    for stage, target in (("NOTICE", lead_id), ("PEER", grant["peer_agent_id"])):
+        with locked_leases() as registry:
+            authority = _attention_authority(registry, lead_id, agent_id, role)
+            if authority is None:
+                return denied_tool_result(request_id, "room authority changed during steering")
+            lease, lead = authority
+            verify_steering_context(lease, lead)
+            grant = steering_grants(lease)[grant_id]
+            steering_peer(lease, grant)
+            if stage == "NOTICE" and grant["state"] == "NOTICE_DELIVERED":
+                continue
+            if stage == "NOTICE" and not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+                return denied_tool_result(request_id, "room changed before steering reservation")
+            if grant["work_epoch"] != epoch or grant["state"] != ("AUTHORIZED" if stage == "NOTICE" else "NOTICE_DELIVERED"):
+                return denied_tool_result(request_id, "steering reservation changed")
+            correlation = str(uuid.uuid4())
+            grant.update(state=stage + "_SENDING", stage=stage, correlation_id=correlation)
+            bump_revision(lease)
+            append_history(lease, "PEER_STEERING", agent_id, role.upper(), correlation, "RESERVED")
+            prompt = (f"Human-authorized Peer steering {grant_id} ({stage}, epoch {epoch}, assignment {grant['assignment_id']}).\n"
+                      "Lead retains engineering ownership. This does not widen write scope, change disposition, or accept work.\n"
+                      + ("Lead notice: the following instruction will be sent to your Peer after this notice is delivered; this is not proof of Peer delivery.\n" if stage == "NOTICE" else "Report evidence and any failed premise to your Lead; stop before any action outside the existing assignment.\n")
+                      + f"Human instruction: {grant['human_instruction']}\nPeer instruction: {grant['prompt']}")
+        try:
+            # Preserve native Peer completion routing to its engineering owner.
+            delivery_actor = lead_id if stage == "PEER" else agent_id
+            response = upstream_call(delivery_actor, {"jsonrpc": "2.0", "id": correlation, "method": "tools/call",
+                "params": {"name": "send_agent_prompt", "arguments": {"agentId": target, "prompt": prompt,
+                           "background": True, "notifyOnFinish": stage == "PEER"}}},
+                agent_scoped=stage == "PEER" or role != "human", allow_unscoped_fallback=stage != "PEER")
+            status = delivery_response_status(response)
+            if isinstance(response, dict) and response.get("id") != correlation:
+                status = "uncertain"
+        except Exception:
+            status = "uncertain"
+        with locked_leases() as registry:
+            lease = lead_lease(registry, lead_id)
+            grant = steering_grants(lease).get(grant_id) if lease else None
+            if not grant or lease["work_epoch"] != epoch or grant.get("correlation_id") != correlation or grant["state"] != stage + "_SENDING":
+                return denied_tool_result(request_id, "stale steering completion; inspect Human delivery evidence")
+            grant["state"] = ("NOTICE_DELIVERED" if stage == "NOTICE" else "DELIVERED") if status == "delivered" else "REJECTED" if status == "rejected" else "UNCERTAIN"
+            grant[stage.lower() + "_delivery"] = status
+            bump_revision(lease)
+            append_history(lease, "PEER_STEERING", agent_id, "TRANSPORT", correlation, grant["state"])
+        if status != "delivered":
+            return denied_tool_result(request_id, f"{stage} steering delivery is {status}; no automatic retry")
+    return text_tool_result(request_id, json.dumps({"grantId": grant_id, "state": "DELIVERED"}))
+
+
+def resolve_peer_steering(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Human inspects delivery evidence; this operation never sends a prompt."""
+    if os.environ.get("PASEO_ROOM_ROLE"):
+        raise workflow.WorkflowError("steering resolution requires an ordinary Human owner shell")
+    if set(arguments) != {"leadAgentId", "grantId", "resolution", "evidence", "expectedWorkEpoch", "expectedRevision"}:
+        raise workflow.WorkflowError("steering resolution requires grant, evidence and exact epoch/revision")
+    evidence = attention.bounded_text(arguments["evidence"], "evidence", 4000)
+    attention.bounded_text(arguments["leadAgentId"], "leadAgentId", 120)
+    attention.bounded_text(arguments["grantId"], "grantId", 120)
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, arguments["leadAgentId"], "human", "human")
+        if authority is None:
+            raise workflow.WorkflowError("steering resolution requires a working room")
+        lease, _ = authority
+        if not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+            raise workflow.WorkflowError("stale steering resolution epoch/revision")
+        grant = steering_grants(lease).get(arguments["grantId"])
+        if not grant or grant["work_epoch"] != lease["work_epoch"]:
+            raise workflow.WorkflowError("steering grant is absent or stale")
+        resolution = arguments["resolution"]
+        if resolution == "CANCELLED" and grant["state"] in {"AUTHORIZED", "NOTICE_DELIVERED"}:
+            grant["state"] = "CANCELLED"
+        elif resolution in {"DELIVERED", "NOT_DELIVERED"} and grant["state"] in {"UNCERTAIN", "NOTICE_SENDING", "PEER_SENDING"}:
+            stage = grant["stage"]
+            grant[stage.lower() + "_delivery"] = "delivered" if resolution == "DELIVERED" else "rejected"
+            grant["state"] = ("NOTICE_DELIVERED" if stage == "NOTICE" else "DELIVERED") if resolution == "DELIVERED" else "REJECTED"
+        else:
+            raise workflow.WorkflowError("resolution cannot override this steering state")
+        grant.update(resolution_evidence=evidence, resolved_at=utc_timestamp())
+        bump_revision(lease)
+        append_history(lease, "PEER_STEERING", "human", "HUMAN", arguments["grantId"], resolution)
+        return {"grantId": arguments["grantId"], "state": grant["state"]}
+
+
+def _attention_authority(
+    registry: dict[str, Any], lead_id: str, actor_id: str, role: str,
+    *, require_working: bool = True,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    lease = lead_lease(registry, lead_id)
+    lead = load_agent_record(lead_id)
+    if (
+        not lease or not lead or (require_working and lease.get("decision_state") != "WORKING")
+        or workspace_lifecycle(lease.get("workspace_id", "")) != "active"
+        or not workflow.lead_matches(lease, lead)
+        or (role == "lead" and actor_id != lead_id)
+        or (role == "human" and actor_id != "human")
+        or (role in {"supervisor", "human"} and not workflow.governs(lease, actor_id, role))
+        or role not in {"lead", "supervisor", "human", "watcher"}
+    ):
+        return None
+    if role == "supervisor":
+        supervisor = load_agent_record(actor_id)
+        labels = supervisor.get("labels") if isinstance(supervisor, dict) else None
+        canonical_provider = (
+            isinstance(supervisor, dict)
+            and supervisor.get("provider")
+            in {"codex-supervisor", "claude-supervisor", "opencode-supervisor"}
+        )
+        if (
+            not isinstance(supervisor, dict)
+            or supervisor.get("archivedAt") is not None
+            or not (
+                isinstance(labels, dict) and labels.get("role") == "supervisor"
+                or canonical_provider
+            )
+        ):
+            return None
+    if role == "watcher":
+        watcher = load_agent_record(actor_id)
+        if (
+            not isinstance(watcher, dict)
+            or watcher.get("archivedAt") is not None
+            or not watcher_provider(watcher)
+        ):
+            return None
+    workflow.verify_context(lease, lead, pin=False)
+    return lease, lead
+
+
+def open_room_ask(
+    agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    if role != "lead":
+        return denied_tool_result(request_id, "only the bound Lead may open a room ask")
+    if set(arguments) != {"askId", "question", "expectedWorkEpoch", "expectedRevision"}:
+        return error_response(request_id, -32602, "ask requires askId, question, expectedWorkEpoch, and expectedRevision")
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, agent_id, agent_id, role)
+        if authority is None:
+            return denied_tool_result(request_id, "caller has no active working room authority")
+        lease, _ = authority
+        epoch = lease.get("work_epoch")
+        if type(arguments["expectedWorkEpoch"]) is not int or arguments["expectedWorkEpoch"] != epoch:
+            return denied_tool_result(request_id, "stale room ask work epoch")
+        if type(arguments["expectedRevision"]) is not int or arguments["expectedRevision"] < 1:
+            return error_response(request_id, -32602, "expectedRevision must be a positive integer")
+        recipient = workflow.governance_id(lease) or "human"
+        ask_id = arguments["askId"]
+        question = arguments["question"]
+        existing = attention.asks_for(lease).get(ask_id) if isinstance(ask_id, str) else None
+        if not expected_version_matches(lease, epoch, arguments["expectedRevision"]):
+            if existing is None:
+                return denied_tool_result(request_id, "stale room ask revision")
+            item, created = attention.open_ask(
+                lease, ask_id=ask_id, question=question, sender=agent_id,
+                sender_role="lead", recipient=recipient, work_epoch=epoch,
+                created_at=utc_timestamp(),
+            )
+            return text_tool_result(request_id, json.dumps({"ask": item, "created": created}, sort_keys=True))
+        item, created = attention.open_ask(
+            lease, ask_id=ask_id, question=question, sender=agent_id,
+            sender_role="lead", recipient=recipient, work_epoch=epoch,
+            created_at=utc_timestamp(),
+        )
+        if created:
+            bump_revision(lease)
+            append_history(lease, "ROOM_ASK", agent_id, "LEAD", ask_id, "OPEN")
+        return text_tool_result(request_id, json.dumps({"ask": item, "created": created}, sort_keys=True))
+
+
+def answer_room_ask(
+    agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    if role not in {"lead", "supervisor", "human"}:
+        return denied_tool_result(request_id, "only the responsible room recipient may answer")
+    if set(arguments) != {"leadAgentId", "askId", "answer", "expectedWorkEpoch", "expectedRevision"}:
+        return error_response(request_id, -32602, "answer requires leadAgentId, askId, answer, expectedWorkEpoch, and expectedRevision")
+    lead_id = arguments.get("leadAgentId")
+    if not isinstance(lead_id, str):
+        return error_response(request_id, -32602, "leadAgentId must be a string")
+    with locked_leases() as registry:
+        authority = _attention_authority(registry, lead_id, agent_id, role)
+        if authority is None:
+            return denied_tool_result(request_id, "caller has no active working room authority")
+        lease, _ = authority
+        epoch = lease.get("work_epoch")
+        if type(arguments["expectedWorkEpoch"]) is not int or arguments["expectedWorkEpoch"] != epoch:
+            return denied_tool_result(request_id, "stale room answer work epoch")
+        if type(arguments["expectedRevision"]) is not int or arguments["expectedRevision"] < 1:
+            return error_response(request_id, -32602, "expectedRevision must be a positive integer")
+        recipient = "human" if role == "human" else agent_id
+        ask_id = arguments["askId"]
+        existing = attention.asks_for(lease).get(ask_id) if isinstance(ask_id, str) else None
+        if existing is None or existing.get("recipient_agent_id") != recipient:
+            return denied_tool_result(request_id, "ask does not belong to this recipient")
+        if not expected_version_matches(lease, epoch, arguments["expectedRevision"]):
+            if existing.get("status") != "ANSWERED":
+                return denied_tool_result(request_id, "stale room answer revision")
+        item, changed = attention.answer_ask(
+            lease, ask_id=ask_id, answer=arguments["answer"], actor=recipient,
+            work_epoch=epoch, answered_at=utc_timestamp(),
+        )
+        if changed:
+            bump_revision(lease)
+            append_history(lease, "ROOM_ASK", agent_id, role.upper(), ask_id, "ANSWERED")
+        return text_tool_result(request_id, json.dumps({"ask": item, "answered": changed}, sort_keys=True))
+
+
+def list_room_attention(
+    agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    if role not in {"lead", "supervisor", "human", "watcher"}:
+        return denied_tool_result(request_id, "only room Lead, governance, or Watcher may inspect attention")
+    if set(arguments) != {"leadAgentId"} or not isinstance(arguments.get("leadAgentId"), str):
+        return error_response(request_id, -32602, "attention list requires leadAgentId")
+    with read_locked_leases() as registry:
+        authority = _attention_authority(registry, arguments["leadAgentId"], agent_id, role, require_working=False)
+        if authority is None:
+            return denied_tool_result(request_id, "caller has no active working room authority")
+        lease, _ = authority
+        epoch = lease["work_epoch"]
+        has_supervisor = workflow.governance_id(lease) is not None
+        now = dt.datetime.now(dt.UTC)
+        asks = []
+        for item in attention.asks_for(lease).values():
+            current = item["work_epoch"] == epoch
+            view = attention.attention_for(item, now, has_supervisor=has_supervisor) if current and lease.get("decision_state") == "WORKING" else dict(item, attention=None, escalate_to=None)
+            asks.append(dict(view, current_epoch=current))
+        asks.sort(key=lambda item: (item["created_at"], item["ask_id"]))
+        result = {"work_epoch": epoch, "revision": lease["revision"], "asks": asks,
+                  "execution_mode": lease.get("execution_mode"),
+                  "callback_attention": [dict(item, escalate_to="human" if item.get("state") == "UNCERTAIN" else "lead")
+                      for item in lease.get("callback_deliveries", {}).values()
+                      if item.get("work_epoch") == epoch and (item.get("state") != "DELIVERED" or item.get("outcome") == "NEEDS_LEAD_DECISION")],
+                  "runtime_binding_status": "VERIFIED_V2" if workflow.binding_version(lease) == 2 and lease.get("runtime_binding") else "LEGACY_UNVERIFIED"}
+    return text_tool_result(request_id, json.dumps(result, sort_keys=True))
+
+
+def reconcile_workspace_authority(lease: dict[str, Any], operation: str) -> str:
+    workspace_id = lease.get("workspace_id")
+    state = workspace_lifecycle(workspace_id) if isinstance(workspace_id, str) else "unreadable"
+    if state in {"missing", "archived"}:
+        lease["state"] = "released"
+        lease["release_reason"] = f"{state}_workspace_{operation}_reconciled"
+        lease["released_at"] = utc_timestamp()
+    return state
+
+
+def normalize_lease_epoch(lease: dict[str, Any], labels: dict[str, Any] | None = None) -> int:
+    """Upgrade a v1 managed lease without reopening an already-ready epoch."""
+    if lease.get("room_kind") != "managed_slp":
+        return 0
+    epoch = lease.get("work_epoch", 1)
+    if not isinstance(epoch, int) or epoch < 1:
+        return 0
+    lease.setdefault("work_epoch", epoch)
+    if lease.pop("legacy_epoch_unknown", False):
+        if isinstance(labels, dict) and labels.get("task_state") == "HANDBACK_READY":
+            lease["handback_epoch"] = epoch
+            lease["decision_state"] = "HANDBACK_READY"
+        else:
+            lease["handback_epoch"] = 0
+            lease["decision_state"] = "WORKING"
+    elif "handback_epoch" not in lease:
+        if isinstance(labels, dict) and labels.get("task_state") == "HANDBACK_READY":
+            lease["handback_epoch"] = epoch
+            lease["decision_state"] = "HANDBACK_READY"
+        else:
+            lease["handback_epoch"] = 0
+            lease.setdefault("decision_state", "WORKING")
+    if lease.get("decision_state") == "HANDBACK_READY" and not isinstance(
+        lease.get("evidence_digest"), str
+    ):
+        message = lease.get("handback_message")
+        if not isinstance(message, str):
+            message = ""
+            lease["legacy_evidence_missing"] = True
+        lease["evidence_digest"] = evidence_digest(epoch, message)
+    return epoch
+
+
+def response_is_error(response: Any) -> bool:
+    if not isinstance(response, dict) or "error" in response:
+        return True
+    result = response.get("result")
+    return isinstance(result, dict) and result.get("isError") is True
+
+
+def delivery_response_status(response: Any) -> str:
+    """Classify delivery without treating missing/ambiguous transport as rejection."""
+    if not isinstance(response, dict):
+        return "uncertain"
+    if "error" in response:
+        return "rejected"
+    result = response.get("result")
+    if not isinstance(result, dict):
+        return "uncertain"
+    return "rejected" if result.get("isError") is True else "delivered"
+
+
+def update_labels(agent_id: str, labels: dict[str, str], request_id: Any, *, caller_id: str | None = None) -> dict[str, Any] | None:
+    return upstream_call(
+        caller_id or agent_id,
+        {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "update_agent",
+                "arguments": {"agentId": agent_id, "labels": labels},
+            },
+        },
+    )
+
+
+def upstream_call(
+    agent_id: str,
+    payload: dict[str, Any],
+    *,
+    agent_scoped: bool = True,
+    allow_unscoped_fallback: bool = True,
+) -> dict[str, Any] | None:
+    if agent_id == "human":
+        agent_scoped = False
+    if not agent_scoped:
+        callback_error = unscoped_callback_error(agent_id, payload)
+        if callback_error is not None:
+            return callback_error
+    url = f"{UPSTREAM}?callerAgentId={agent_id}" if agent_scoped else UPSTREAM
     request = urllib.request.Request(
         url,
         data=json.dumps(payload, separators=(",", ":")).encode(),
@@ -202,7 +1761,7 @@ def upstream_call(agent_id: str, payload: dict[str, Any]) -> dict[str, Any] | No
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=20 if os.environ.get("ROOM_CALLBACK_SERVICE") == "1" else 30) as response:
             body = response.read().decode()
     except (urllib.error.URLError, TimeoutError) as error:
         raise RuntimeError(f"Paseo MCP upstream unavailable: {error}") from error
@@ -222,15 +1781,163 @@ def upstream_call(agent_id: str, payload: dict[str, Any]) -> dict[str, Any] | No
         request_id = payload.get("id")
         for message in messages:
             if message.get("id") == request_id:
+                if agent_scoped and allow_unscoped_fallback and method_not_found(message):
+                    fallback_payload = dict(payload)
+                    params = fallback_payload.get("params")
+                    if fallback_payload.get("method") == "tools/call" and isinstance(params, dict):
+                        fallback_params = dict(params)
+                        name = fallback_params.get("name")
+                        arguments = fallback_params.get("arguments", {})
+                        if isinstance(name, str) and isinstance(arguments, dict):
+                            fallback_params["arguments"] = unscoped_arguments(
+                                agent_id, name, arguments
+                            )
+                        fallback_payload["params"] = fallback_params
+                    return upstream_call(
+                        agent_id, fallback_payload, agent_scoped=False
+                    )
                 return message
-        return messages[-1]
+        return None
     value = json.loads(body)
-    return value if isinstance(value, dict) else None
+    if not isinstance(value, dict):
+        return None
+    request_id = payload.get("id")
+    if value.get("id") != request_id:
+        return None
+    if agent_scoped and allow_unscoped_fallback and method_not_found(value):
+        fallback_payload = dict(payload)
+        params = fallback_payload.get("params")
+        if fallback_payload.get("method") == "tools/call" and isinstance(params, dict):
+            fallback_params = dict(params)
+            name = fallback_params.get("name")
+            arguments = fallback_params.get("arguments", {})
+            if isinstance(name, str) and isinstance(arguments, dict):
+                fallback_params["arguments"] = unscoped_arguments(agent_id, name, arguments)
+            fallback_payload["params"] = fallback_params
+        return upstream_call(agent_id, fallback_payload, agent_scoped=False)
+    return value
+
+
+def needs_finish_callback(name: Any, arguments: dict[str, Any]) -> bool:
+    return name in {"create_agent", "send_agent_prompt"} and arguments.get("notifyOnFinish") is not False
+
+
+CALLBACK_TRANSPORT = "room-callback-v1"
+
+
+def callback_relay_ready() -> bool:
+    """Capability heartbeat, never a second source of room authority."""
+    path = LEASES_PATH.parent / "callback-relay.json"
+    try:
+        info = path.lstat()
+        parent = path.parent.lstat()
+        if (not stat.S_ISREG(info.st_mode) or not stat.S_ISDIR(parent.st_mode)
+                or info.st_uid != os.getuid() or parent.st_uid != os.getuid()
+                or info.st_mode & 0o077 or parent.st_mode & 0o022):
+            return False
+        value = json.loads(path.read_text())
+        age = time.time() - value["heartbeat"]
+        if value.get("version") != 1 or not 0 <= age <= 20 or type(value.get("pid")) is not int:
+            return False
+        os.kill(value["pid"], 0)
+        return value.get("proxyDigest") == hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def relay_dispatch_allowed(agent_id: str, name: str, arguments: dict[str, Any]) -> bool:
+    if not callback_relay_ready():
+        return False
+    if name == "create_agent":
+        return arguments.get("labels", {}).get("callback_transport") == CALLBACK_TRANSPORT
+    if name == "send_agent_prompt":
+        target = load_agent_record(arguments.get("agentId", ""))
+        labels = target.get("labels", {}) if target else {}
+        return (labels.get("role") == "peer" and labels.get("paseo.parent-agent-id") == agent_id
+                and labels.get("callback_transport") == CALLBACK_TRANSPORT)
+    return False
+
+
+def unscoped_callback_error(agent_id: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+    params = payload.get("params", {})
+    arguments = params.get("arguments", {}) if isinstance(params, dict) else {}
+    if (agent_id != "human" and payload.get("method") == "tools/call"
+            and isinstance(params, dict) and isinstance(arguments, dict)
+            and needs_finish_callback(params.get("name"), arguments)):
+        if relay_dispatch_allowed(agent_id, params.get("name"), arguments):
+            return None
+        return denied_tool_result(payload.get("id"),
+            "Native finish callback requires an agent-scoped Paseo tool. "
+            "Top-level fallback loses callerAgentId; dispatch was not sent.")
+    return None
+
+
+def method_not_found(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    error = response.get("error")
+    return isinstance(error, dict) and error.get("code") == -32601
+
+
+def tool_not_available(response: Any) -> bool:
+    if method_not_found(response) or not isinstance(response, dict):
+        return method_not_found(response)
+    error = response.get("error")
+    if not isinstance(error, dict) or error.get("code") not in {-32601, -32602}:
+        return False
+    message = error.get("message")
+    return isinstance(message, str) and bool(
+        re.search(r"(?i)\b(?:tool|method)\b.*\b(?:not found|unknown|unavailable)\b", message)
+    )
+
+
+def unscoped_arguments(
+    agent_id: str,
+    name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Preserve agent-scoped defaults when Paseo 0.8 exposes an empty caller policy.
+
+    Room providers intentionally disable native Paseo tool injection. Paseo 0.8
+    reuses that per-agent policy for /mcp/agents, leaving caller-scoped catalogs
+    empty. The room proxy remains the authority boundary, so its guarded fallback
+    uses the top-level catalog and restores only the caller context that the daemon
+    would otherwise derive.
+    """
+    scoped = dict(arguments)
+    caller = load_agent_record(agent_id)
+    workspace_id = caller.get("workspaceId") if isinstance(caller, dict) else None
+    cwd = caller.get("cwd") if isinstance(caller, dict) else None
+
+    if name == "create_agent":
+        if "workspaceId" not in scoped and isinstance(workspace_id, str):
+            scoped["workspaceId"] = workspace_id
+        labels = scoped.get("labels")
+        next_labels = dict(labels) if isinstance(labels, dict) else {}
+        next_labels["paseo.parent-agent-id"] = agent_id
+        scoped["labels"] = next_labels
+        scoped.setdefault("background", True)
+        scoped.setdefault("notifyOnFinish", True)
+    elif name == "send_agent_prompt":
+        scoped.setdefault("background", True)
+        scoped.setdefault("notifyOnFinish", True)
+    elif name == "create_workspace":
+        if "path" not in scoped and isinstance(cwd, str):
+            scoped["path"] = cwd
+    elif name == "rename_workspace":
+        if "workspaceId" not in scoped and isinstance(workspace_id, str):
+            scoped["workspaceId"] = workspace_id
+    elif name in {"list_terminals", "create_terminal"}:
+        if "cwd" not in scoped and isinstance(cwd, str):
+            scoped["cwd"] = cwd
+    return scoped
 
 
 def allowed_tool(role: str, name: str) -> bool:
     if role == "peer":
         return False
+    if role == "watcher":
+        return name in {"list_agents", "list_workspaces"}
     if name in SCHEDULE_MUTATION_TOOLS:
         return False
     if role == "supervisor":
@@ -241,6 +1948,13 @@ def allowed_tool(role: str, name: str) -> bool:
     if role == "lead" and name in LEAD_BLOCKED_TOOLS:
         return False
     return True
+
+
+def watcher_provider(record: dict[str, Any]) -> bool:
+    provider = record.get("provider")
+    return isinstance(provider, str) and (
+        provider == "codex-watcher" or provider.startswith("codex-watcher/")
+    )
 
 
 def run_guard(
@@ -264,6 +1978,7 @@ def run_guard(
         **os.environ,
         "PASEO_AGENT_ID": agent_id,
         "PASEO_ROOM_ROLE": role,
+        "PASEO_ROOM_PROXY_GUARD": "1",
     }
     completed = subprocess.run(
         ["python3", str(GUARD), "--role", role],
@@ -289,10 +2004,29 @@ def run_guard(
 
 
 def list_tools(agent_id: str, role: str, request_id: Any) -> dict[str, Any]:
+    if role == "watcher":
+        watcher = load_agent_record(agent_id)
+        if not isinstance(watcher, dict) or not watcher_provider(watcher):
+            return denied_tool_result(request_id, "watcher provider identity required")
     response = upstream_call(
         agent_id,
         {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": {}},
     )
+    result = response.get("result") if isinstance(response, dict) else None
+    scoped_tools = result.get("tools") if isinstance(result, dict) else None
+    missing_control_catalog = (
+        isinstance(scoped_tools, list)
+        and not any(
+            isinstance(item, dict) and item.get("name") == "list_agents"
+            for item in scoped_tools
+        )
+    )
+    if method_not_found(response) or missing_control_catalog:
+        response = upstream_call(
+            agent_id,
+            {"jsonrpc": "2.0", "id": request_id, "method": "tools/list", "params": {}},
+            agent_scoped=False,
+        )
     if not response or "result" not in response:
         return error_response(request_id, -32603, "Paseo MCP returned no tool catalog")
     result = response.get("result")
@@ -307,7 +2041,31 @@ def list_tools(agent_id: str, role: str, request_id: Any) -> dict[str, Any]:
         and allowed_tool(role, item["name"])
     ]
     if role == "lead":
-        filtered.append(HAND_BACK_TOOL)
+        filtered.extend((HAND_BACK_TOOL, SUBMIT_RESULT_TOOL, WORK_CONTEXT_TOOL,
+                         WORK_CANDIDATE_TOOL, PEER_REPORT_TOOL, RECOVER_PEER_CALLBACKS_TOOL,
+                         OPEN_ROOM_ASK_TOOL, ANSWER_ROOM_ASK_TOOL,
+                         LIST_ROOM_ATTENTION_TOOL, LIST_ROOM_OBSERVATIONS_TOOL,
+                         RESOLVE_PEER_REPORT_TOOL, INSPECT_PEER_ATTENTION_TOOL))
+        filtered.extend(TASK_TOOLS)
+    if role == "supervisor":
+        filtered.extend(
+            (
+                LIST_SLP_DECISIONS_TOOL,
+                REOPEN_WORK_EPOCH_TOOL,
+                RESOLVE_SLP_DELIVERY_TOOL,
+                RECORD_SLP_DECISION_TOOL,
+                ARCHIVE_SLP_WORKSPACE_TOOL,
+                RECOVER_WORKING_LEAD_TOOL,
+                INSPECT_SLP_OWNERSHIP_TOOL,
+                RETIRE_LEGACY_LEAD_TOOL,
+                ANSWER_ROOM_ASK_TOOL,
+                LIST_ROOM_ATTENTION_TOOL,
+                LIST_ROOM_OBSERVATIONS_TOOL,
+                STEER_ROOM_PEER_TOOL,
+            )
+        )
+    if role == "watcher":
+        filtered.extend((LIST_ROOM_ATTENTION_TOOL, LIST_ROOM_OBSERVATIONS_TOOL))
     return {
         "jsonrpc": "2.0",
         "id": request_id,
@@ -323,8 +2081,8 @@ def handback_to_parent(
 ) -> dict[str, Any]:
     if role != "lead":
         return denied_tool_result(request_id, "only Lead can hand back to a parent seat")
-    if set(arguments) != {"message"}:
-        return error_response(request_id, -32602, "handback requires only message")
+    if "message" not in arguments or set(arguments) - {"message", "candidateDigest"}:
+        return error_response(request_id, -32602, "handback requires message and optional candidateDigest")
     message = arguments.get("message")
     if not isinstance(message, str) or not message.strip():
         return error_response(request_id, -32602, "handback message must be non-empty")
@@ -337,10 +2095,11 @@ def handback_to_parent(
         or lead.get("archivedAt") is not None
     ):
         return denied_tool_result(request_id, "caller is not an active Lead seat")
-    if labels.get("task_state") == "HANDBACK_READY":
-        return denied_tool_result(request_id, "final handback was already delivered")
-
-    parent_id = labels.get("paseo.parent-agent-id")
+    with locked_leases() as registry:
+        bound = lead_lease(registry, agent_id)
+        if not bound or not workflow.lead_matches(bound, lead):
+            return denied_tool_result(request_id, "caller has no matching managed authority binding")
+        parent_id = workflow.governance_id(bound)
     parent = load_agent_record(parent_id) if isinstance(parent_id, str) else None
     parent_labels = parent.get("labels") if isinstance(parent, dict) else None
     parent_is_supervisor = (
@@ -352,10 +2111,1544 @@ def handback_to_parent(
         in {"codex-supervisor", "claude-supervisor", "opencode-supervisor"}
     )
     if (
-        not parent_is_supervisor
-        or parent.get("archivedAt") is not None
+        parent_id is not None and (not parent_is_supervisor
+        or parent.get("archivedAt") is not None)
     ):
         return denied_tool_result(request_id, "active parent governance seat not found")
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, agent_id)
+        if not lease or lease.get("supervisor_agent_id") != parent_id:
+            return denied_tool_result(request_id, "caller has no active managed SLP lease")
+        workspace_state = reconcile_workspace_authority(lease, "handback")
+        if workspace_state != "active":
+            return denied_tool_result(
+                request_id,
+                f"managed workspace authority is {workspace_state}; handback failed closed",
+            )
+        epoch = normalize_lease_epoch(lease, labels)
+        handback_epoch = lease.get("handback_epoch", 0)
+        decision_state = lease.get("decision_state")
+        if epoch < 1:
+            return denied_tool_result(request_id, "managed SLP work epoch is invalid")
+        if handback_epoch == epoch or decision_state == "HANDBACK_READY":
+            return denied_tool_result(
+                request_id,
+                f"final handback for work epoch {epoch} was already delivered",
+            )
+        if decision_state != "WORKING":
+            return denied_tool_result(
+                request_id,
+                f"work epoch {epoch} has unresolved delivery state {decision_state}",
+            )
+        if handback_epoch not in range(0, epoch):
+            return denied_tool_result(request_id, "managed SLP handback epoch is invalid")
+        if pending_steering(lease):
+            return denied_tool_result(request_id, "resolve or cancel pending Peer steering before final handback")
+        tasks.verify_complete(lease)
+        obligations = attention.reopen_obligations(lease)
+        unresolved = [item["report_id"] for item in obligations
+                      if item.get("resolution", {}).get("outcome") != "ESCALATED_TO_HUMAN"]
+        if unresolved:
+            return denied_tool_result(request_id, "REOPEN_REQUEST needs an evidence-backed decision before handback: " + ", ".join(unresolved))
+        if obligations:
+            message = message.strip() + "\n\nUnresolved owner decisions (not engineering success):\n" + json.dumps([
+                {"reportId": item["report_id"], "question": item["question"], "resolution": item["resolution"]}
+                for item in obligations], sort_keys=True)
+        revision = normalize_lease_revision(lease)
+        candidate_digest = verify_candidate(lease, lead, arguments.get("candidateDigest"))
+        changed_resolutions = [item for item in attention.asks_for(lease).values()
+                               if item["work_epoch"] == epoch and item.get("kind") == "REOPEN_REQUEST"
+                               and item.get("resolution", {}).get("outcome") == "RESOLVED_BY_LEAD"
+                               and item["resolution"].get("changesWork")]
+        if changed_resolutions:
+            root = workflow.repository_for(lead, lease)
+            verified_digest = candidate_digest or (workflow.snapshot(root)["digest"] if root else None)
+            for item in changed_resolutions:
+                if item["resolution"].get("candidateDigest") != verified_digest:
+                    return denied_tool_result(request_id, "changed candidate needs fresh dissent-resolution evidence: " + item["report_id"])
+        if candidate_digest:
+            lease["candidate_digest"] = candidate_digest
+        correlation_id = str(uuid.uuid4())
+        lease["decision_state"] = "HANDBACK_SENDING"
+        lease["handback_message"] = message.strip()
+        lease["evidence_digest"] = evidence_digest(epoch, message.strip())
+        if candidate_digest:
+            lease["evidence_digest"] = digest_payload({"work_epoch": epoch, "handback_message": message.strip(), "candidate_digest": candidate_digest})
+        lease["delivery_started_at"] = utc_timestamp()
+        lease["delivery_correlation_id"] = correlation_id
+        reservation_revision = bump_revision(lease)
+        append_history(
+            lease, "HANDBACK", agent_id, "LEAD", correlation_id, "RESERVED"
+        )
+
+    try:
+        response = {"result": {"structuredContent": {"localReceipt": correlation_id}}} if parent_id is None else upstream_call(
+            agent_id,
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": "send_agent_prompt",
+                    "arguments": {
+                        "agentId": parent_id,
+                        "prompt": f"Final Lead handback (work epoch {epoch}, candidate {candidate_digest or 'legacy-unbound'}):\n\n{message.strip()}",
+                        "background": True,
+                        "notifyOnFinish": False,
+                    },
+                },
+            },
+        )
+    except Exception:
+        with locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            if (
+                lease
+                and lease.get("work_epoch") == epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "HANDBACK", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        raise
+    delivery_status = "delivered" if parent_id is None else delivery_response_status(response)
+    if delivery_status == "uncertain":
+        with locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            if (
+                lease
+                and lease.get("work_epoch") == epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "HANDBACK", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        return text_tool_result(
+            request_id,
+            "Final handback completion is uncertain; it was not retried and requires Human resolution.",
+            is_error=True,
+        )
+    if delivery_status == "rejected":
+        with locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            if (
+                lease
+                and lease.get("decision_state") == "HANDBACK_SENDING"
+                and lease.get("work_epoch") == epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "HANDBACK", agent_id, "TRANSPORT", correlation_id, "REJECTED"
+                )
+                lease["decision_state"] = "WORKING"
+                lease.pop("delivery_started_at", None)
+                lease.pop("delivery_correlation_id", None)
+                bump_revision(lease)
+        return text_tool_result(
+            request_id,
+            "Final handback was definitively rejected; this epoch may retry.",
+            is_error=True,
+        )
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, agent_id)
+        if (
+            not lease
+            or lease.get("decision_state") != "HANDBACK_SENDING"
+            or lease.get("work_epoch") != epoch
+            or lease.get("revision") != reservation_revision
+            or lease.get("delivery_correlation_id") != correlation_id
+        ):
+            return text_tool_result(
+                request_id,
+                "Final handback was delivered but lifecycle reservation changed unexpectedly.",
+                is_error=True,
+            )
+        lease["handback_epoch"] = epoch
+        lease["decision_state"] = "HANDBACK_READY"
+        lease["handback_at"] = utc_timestamp()
+        lease.pop("delivery_started_at", None)
+        lease.pop("delivery_correlation_id", None)
+        bump_revision(lease)
+        append_history(
+            lease, "HANDBACK", agent_id, "TRANSPORT", correlation_id, "DELIVERED"
+        )
+        updated_labels = dict(labels)
+        updated_labels.update(
+            {
+                "room_kind": "managed_slp",
+                "work_epoch": str(epoch),
+                "task_state": "HANDBACK_READY",
+            }
+        )
+    label_response = update_labels(agent_id, updated_labels, request_id)
+    if response_is_error(label_response):
+        return text_tool_result(
+            request_id,
+            f"Final handback for work epoch {epoch} was delivered and deduplicated, "
+            "but the Lead display labels could not be updated.",
+        )
+    return text_tool_result(
+        request_id,
+        f"Final handback delivered for work epoch {epoch}; Lead is now HANDBACK_READY.",
+    )
+
+
+def list_slp_decisions(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can list SLP decisions")
+    if arguments:
+        return error_response(request_id, -32602, "list_slp_decisions takes no arguments")
+    pending = []
+    with locked_leases() as registry:
+        for workspace_id, lease in registry["leases"].items():
+            if not isinstance(lease, dict) or lease.get("state") != "active":
+                continue
+            if lease.get("room_kind") != "managed_slp":
+                continue
+            if not workflow.governs(lease, agent_id, role):
+                continue
+            decision_state = lease.get("decision_state")
+            revision = normalize_lease_revision(lease)
+            if decision_state == "ARCHIVE_SENDING":
+                epoch = lease.get("work_epoch")
+                if not isinstance(epoch, int) or epoch < 1:
+                    return text_tool_result(
+                        request_id, "Managed archive work epoch is invalid.", is_error=True
+                    )
+                pending.append(
+                    {
+                        "workspace_id": workspace_id,
+                        "lead_agent_id": lease.get("lead_agent_id"),
+                        "room_kind": "managed_slp",
+                        "work_epoch": epoch,
+                        "revision": revision,
+                        "decision_state": decision_state,
+                        "correlation_id": lease.get("delivery_correlation_id"),
+                        "evidence_digest": lease.get("evidence_digest"),
+                        "handback_at": lease.get("handback_at"),
+                        "handback_message": lease.get("handback_message"),
+                        "human_actions": ["resolve_delivery_uncertainty"],
+                    }
+                )
+                continue
+            workspace_state = workspace_lifecycle(workspace_id)
+            if workspace_state == "unreadable":
+                return text_tool_result(
+                    request_id,
+                    f"Workspace authority is unreadable for {workspace_id}; decision queue failed closed.",
+                    is_error=True,
+                )
+            if workspace_state in {"missing", "archived"}:
+                lease["state"] = "released"
+                lease["release_reason"] = f"{workspace_state}_workspace_queue_reconciled"
+                lease["released_at"] = (
+                    dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+                )
+                continue
+            lead_id = lease.get("lead_agent_id")
+            record_state, lead = (
+                agent_record_status(lead_id)
+                if isinstance(lead_id, str)
+                else ("missing", None)
+            )
+            if record_state in {"missing", "archived"}:
+                lease["state"] = "released"
+                lease["release_reason"] = f"{record_state}_agent_queue_reconciled"
+                lease["released_at"] = (
+                    dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+                )
+                continue
+            if record_state != "active" or not isinstance(lead, dict):
+                return text_tool_result(
+                    request_id,
+                    f"Lead authority is unreadable for {lead_id}; decision queue failed closed.",
+                    is_error=True,
+                )
+            labels = lead.get("labels")
+            epoch = normalize_lease_epoch(lease, labels if isinstance(labels, dict) else None)
+            decision_state = lease.get("decision_state")
+            if epoch < 1 or decision_state not in {
+                "HANDBACK_READY",
+                "HANDBACK_SENDING",
+                "REOPEN_SENDING",
+            }:
+                continue
+            decided = (
+                decision_state == "HANDBACK_READY"
+                and lease.get("human_decision_epoch") == epoch
+                and lease.get("human_decision_evidence_digest") == lease.get("evidence_digest")
+                and lease.get("human_decision") in {"ACCEPTED", "ABANDONED"}
+            )
+            actions = (
+                ["archive"]
+                if decided
+                else ["accept", "abandon", "bounded_follow_up"]
+                if decision_state == "HANDBACK_READY"
+                else ["resolve_delivery_uncertainty"]
+            )
+            pending.append(
+                {
+                    "workspace_id": workspace_id,
+                    "lead_agent_id": lease.get("lead_agent_id"),
+                    "room_kind": lease.get("room_kind", "managed_slp"),
+                    "work_epoch": epoch,
+                    "revision": revision,
+                    "decision_state": decision_state,
+                    "correlation_id": lease.get("delivery_correlation_id"),
+                    "evidence_digest": lease.get("evidence_digest"),
+                    "handback_at": lease.get("handback_at"),
+                    "handback_message": lease.get("handback_message"),
+                    "human_actions": actions,
+                    "authority_mode": lease.get("authority_mode", "parented"),
+                    "candidate_digest": lease.get("candidate_digest"),
+                }
+            )
+    return text_tool_result(request_id, json.dumps({"pending": pending}, sort_keys=True))
+
+
+def reopen_work_epoch(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can reopen SLP work")
+    required = {"agentId", "prompt", "expectedWorkEpoch", "expectedRevision"}
+    if set(arguments) != required:
+        return error_response(
+            request_id, -32602, "reopen requires agentId, prompt, expectedWorkEpoch, and expectedRevision"
+        )
+    lead_id = arguments.get("agentId")
+    prompt = arguments.get("prompt")
+    if not isinstance(lead_id, str) or not isinstance(prompt, str) or not prompt.strip():
+        return error_response(request_id, -32602, "reopen agentId and prompt must be non-empty")
+    lead = load_agent_record(lead_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+    if (
+        not isinstance(labels, dict)
+        or labels.get("role") != "lead"
+        or lead.get("archivedAt") is not None
+    ):
+        return denied_tool_result(request_id, "target is not an active owned Lead")
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if not lease or not workflow.governs(lease, agent_id, role):
+            return denied_tool_result(request_id, "target has no active managed SLP lease")
+        if not workflow.lead_matches(lease, lead):
+            return denied_tool_result(request_id, "Lead authority binding drifted")
+        workflow.require_current_binding(lease)
+        workflow.verify_context(lease, lead, pin=True)
+        workspace_state = reconcile_workspace_authority(lease, "reopen")
+        if workspace_state != "active":
+            return denied_tool_result(
+                request_id,
+                f"managed workspace authority is {workspace_state}; reopen failed closed",
+            )
+        epoch = normalize_lease_epoch(lease, labels)
+        if not expected_version_matches(
+            lease, arguments.get("expectedWorkEpoch"), arguments.get("expectedRevision")
+        ):
+            return denied_tool_result(request_id, "stale managed SLP epoch or revision")
+        if lease.get("human_decision") in {"ACCEPTED", "ABANDONED"}:
+            return denied_tool_result(request_id, "Human decision for this work epoch is already recorded")
+        if (
+            not isinstance(epoch, int)
+            or lease.get("handback_epoch", 0) != epoch
+            or lease.get("decision_state") != "HANDBACK_READY"
+            or lease.get("human_decision") in {"ACCEPTED", "ABANDONED"}
+        ):
+            return denied_tool_result(request_id, "target is not awaiting a Human decision")
+        next_epoch = epoch + 1
+        correlation_id = str(uuid.uuid4())
+        lease["work_epoch"] = next_epoch
+        lease["decision_state"] = "REOPEN_SENDING"
+        lease["delivery_started_at"] = utc_timestamp()
+        lease["delivery_correlation_id"] = correlation_id
+        reserve_prior_evidence(lease)
+        for key in (
+            "human_decision", "human_decision_epoch", "human_decision_evidence_digest",
+            "human_decision_at",
+        ):
+            lease.pop(key, None)
+        reservation_revision = bump_revision(lease)
+        append_history(
+            lease, "REOPEN", agent_id, "HUMAN" if role == "human" else "SUPERVISOR", correlation_id, "RESERVED"
+        )
+    try:
+        prompt_response = upstream_call(
+            agent_id,
+            {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": "send_agent_prompt",
+                "arguments": {
+                    "agentId": lead_id,
+                    "prompt": prompt.strip(),
+                    "background": True,
+                    "notifyOnFinish": False,
+                },
+            },
+            },
+        )
+    except Exception:
+        with locked_leases() as registry:
+            lease = lead_lease(registry, lead_id)
+            if (
+                lease
+                and lease.get("work_epoch") == next_epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "REOPEN", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        raise
+    delivery_status = delivery_response_status(prompt_response)
+    if delivery_status == "uncertain":
+        with locked_leases() as registry:
+            lease = lead_lease(registry, lead_id)
+            if (
+                lease
+                and lease.get("work_epoch") == next_epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "REOPEN", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        return text_tool_result(
+            request_id,
+            "Follow-up prompt completion is uncertain; it was not retried and requires Human resolution.",
+            is_error=True,
+        )
+    if delivery_status == "rejected":
+        with locked_leases() as registry:
+            lease = lead_lease(registry, lead_id)
+            if (
+                lease
+                and lease.get("decision_state") == "REOPEN_SENDING"
+                and lease.get("work_epoch") == next_epoch
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "REOPEN", agent_id, "TRANSPORT", correlation_id, "REJECTED"
+                )
+                lease["work_epoch"] = epoch
+                lease["decision_state"] = "HANDBACK_READY"
+                lease.pop("delivery_started_at", None)
+                lease.pop("delivery_correlation_id", None)
+                restore_prior_evidence(lease)
+                bump_revision(lease)
+        return text_tool_result(
+            request_id,
+            "Follow-up prompt was definitively rejected; work epoch was not advanced.",
+            is_error=True,
+        )
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if (
+            not lease
+            or lease.get("decision_state") != "REOPEN_SENDING"
+            or lease.get("work_epoch") != next_epoch
+            or lease.get("revision") != reservation_revision
+            or lease.get("delivery_correlation_id") != correlation_id
+        ):
+            return text_tool_result(
+                request_id,
+                "Follow-up was delivered but lifecycle reservation changed unexpectedly.",
+                is_error=True,
+            )
+        lease["decision_state"] = "WORKING"
+        lease["reopened_at"] = utc_timestamp()
+        lease.pop("delivery_started_at", None)
+        lease.pop("delivery_correlation_id", None)
+        discard_prior_evidence(lease)
+        bump_revision(lease)
+        append_history(
+            lease, "REOPEN", agent_id, "TRANSPORT", correlation_id, "DELIVERED"
+        )
+        updated_labels = dict(labels)
+        updated_labels.update(
+            {
+                "room_kind": "managed_slp",
+                "work_epoch": str(next_epoch),
+                "task_state": "LEASED",
+            }
+        )
+    label_response = update_labels(lead_id, updated_labels, request_id)
+    if response_is_error(label_response):
+        return text_tool_result(
+            request_id,
+            f"Managed SLP Lead reopened at work epoch {next_epoch}, but display labels could not be updated.",
+        )
+    return text_tool_result(request_id, f"Managed SLP Lead reopened at work epoch {next_epoch}.")
+
+
+def resolve_slp_delivery(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can resolve SLP delivery")
+    required = {
+        "agentId", "resolution", "expectedWorkEpoch", "expectedRevision", "correlationId"
+    }
+    if set(arguments) != required:
+        return error_response(request_id, -32602, "resolution requires agentId, resolution, expectedWorkEpoch, expectedRevision, and correlationId")
+    lead_id = arguments.get("agentId")
+    resolution = arguments.get("resolution")
+    if not isinstance(lead_id, str) or resolution not in {"DELIVERED", "NOT_DELIVERED"}:
+        return error_response(request_id, -32602, "invalid delivery resolution")
+    lead = load_agent_record(lead_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if not lease or not workflow.governs(lease, agent_id, role):
+            return denied_tool_result(request_id, "target has no active managed SLP lease")
+        state = lease.get("decision_state")
+        epoch = normalize_lease_epoch(lease, labels)
+        if state != "ARCHIVE_SENDING" and (
+            not isinstance(labels, dict)
+            or labels.get("role") != "lead"
+            or not workflow.lead_matches(lease, lead)
+            or lead.get("archivedAt") is not None
+        ):
+            return denied_tool_result(request_id, "target is not an active owned Lead")
+        correlation_id = arguments.get("correlationId")
+        if (
+            not expected_version_matches(
+                lease, arguments.get("expectedWorkEpoch"), arguments.get("expectedRevision")
+            )
+            or not isinstance(correlation_id, str)
+            or lease.get("delivery_correlation_id") != correlation_id
+        ):
+            return denied_tool_result(request_id, "stale managed SLP delivery resolution")
+        if state not in {"HANDBACK_SENDING", "REOPEN_SENDING", "ARCHIVE_SENDING"} or epoch < 1:
+            return denied_tool_result(request_id, "target has no uncertain delivery to resolve")
+
+        updated_labels = dict(labels) if isinstance(labels, dict) else None
+        if state == "ARCHIVE_SENDING":
+            if resolution == "DELIVERED":
+                lease["state"] = "released"
+                lease["decision_state"] = "ARCHIVED"
+                lease["release_reason"] = "human_resolved_workspace_archived"
+                lease["released_at"] = utc_timestamp()
+            else:
+                lease["decision_state"] = "HANDBACK_READY"
+        elif state == "HANDBACK_SENDING":
+            if resolution == "DELIVERED":
+                lease["handback_epoch"] = epoch
+                lease["decision_state"] = "HANDBACK_READY"
+                lease["handback_at"] = (
+                    dt.datetime.now(dt.UTC).isoformat().replace("+00:00", "Z")
+                )
+                updated_labels.update(
+                    {"room_kind": "managed_slp", "work_epoch": str(epoch), "task_state": "HANDBACK_READY"}
+                )
+            else:
+                lease["decision_state"] = "WORKING"
+                lease.pop("handback_message", None)
+                updated_labels["task_state"] = "LEASED"
+        else:
+            previous_epoch = epoch - 1
+            if resolution == "DELIVERED":
+                lease["decision_state"] = "WORKING"
+                discard_prior_evidence(lease)
+                updated_labels.update(
+                    {"room_kind": "managed_slp", "work_epoch": str(epoch), "task_state": "LEASED"}
+                )
+            else:
+                lease["work_epoch"] = previous_epoch
+                lease["decision_state"] = "HANDBACK_READY"
+                restore_prior_evidence(lease)
+                updated_labels.update(
+                    {
+                        "room_kind": "managed_slp",
+                        "work_epoch": str(previous_epoch),
+                        "task_state": "HANDBACK_READY",
+                    }
+                )
+        lease.pop("delivery_started_at", None)
+        lease.pop("delivery_correlation_id", None)
+        lease["delivery_resolved_as"] = resolution
+        lease["delivery_resolved_at"] = utc_timestamp()
+        bump_revision(lease)
+        append_history(
+            lease, "RESOLVE_DELIVERY", agent_id, "HUMAN" if role == "human" else "HUMAN_VIA_SUPERVISOR",
+            correlation_id, resolution,
+        )
+
+    if updated_labels is None:
+        return text_tool_result(request_id, f"Managed SLP delivery resolved as {resolution}.")
+    label_response = update_labels(lead_id, updated_labels, request_id)
+    if response_is_error(label_response):
+        return text_tool_result(
+            request_id,
+            "Delivery uncertainty was resolved in the ledger, but display labels could not be updated.",
+        )
+    return text_tool_result(request_id, f"Managed SLP delivery resolved as {resolution}.")
+
+
+def record_slp_decision(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can record an SLP decision")
+    required = {
+        "agentId", "decision", "evidenceDigest", "expectedWorkEpoch", "expectedRevision"
+    }
+    if set(arguments) != required:
+        return error_response(request_id, -32602, "decision requires agentId, decision, evidenceDigest, expectedWorkEpoch, and expectedRevision")
+    lead_id = arguments.get("agentId")
+    decision = arguments.get("decision")
+    digest = arguments.get("evidenceDigest")
+    if (
+        not isinstance(lead_id, str)
+        or decision not in {"ACCEPTED", "ABANDONED"}
+        or not isinstance(digest, str)
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+    ):
+        return error_response(request_id, -32602, "invalid managed SLP Human decision")
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if not lease or not workflow.governs(lease, agent_id, role):
+            return denied_tool_result(request_id, "target has no active managed SLP lease")
+        workspace_id = lease.get("workspace_id")
+        workspace_state = (
+            workspace_lifecycle(workspace_id)
+            if isinstance(workspace_id, str)
+            else "unreadable"
+        )
+        lead_state, lead = agent_record_status(lead_id)
+        if workspace_state in {"missing", "archived"} or lead_state in {
+            "missing", "archived"
+        }:
+            lease["state"] = "released"
+            lease["released_at"] = utc_timestamp()
+            lease["release_reason"] = (
+                f"{workspace_state}_workspace_decision_reconciled"
+                if workspace_state in {"missing", "archived"}
+                else f"{lead_state}_agent_decision_reconciled"
+            )
+            return denied_tool_result(request_id, "managed SLP authority no longer exists")
+        lead_labels = lead.get("labels") if isinstance(lead, dict) else None
+        if (
+            workspace_state != "active"
+            or lead_state != "active"
+            or not isinstance(lead_labels, dict)
+            or lead_labels.get("role") != "lead"
+            or not workflow.lead_matches(lease, lead)
+        ):
+            return denied_tool_result(request_id, "managed SLP authority is unreadable or invalid")
+        epoch = normalize_lease_epoch(lease)
+        if not expected_version_matches(
+            lease, arguments.get("expectedWorkEpoch"), arguments.get("expectedRevision")
+        ):
+            return denied_tool_result(request_id, "stale managed SLP epoch or revision")
+        if lease.get("human_decision") in {"ACCEPTED", "ABANDONED"}:
+            return denied_tool_result(request_id, "Human decision for this work epoch is already recorded")
+        if (
+            lease.get("decision_state") != "HANDBACK_READY"
+            or lease.get("handback_epoch") != epoch
+            or lease.get("evidence_digest") != digest
+            or (decision == "ACCEPTED" and lease.get("legacy_evidence_missing") is True)
+        ):
+            return denied_tool_result(request_id, "Human decision evidence does not match the ready epoch")
+        if decision == "ACCEPTED":
+            verify_candidate(lease, lead)
+        correlation_id = str(uuid.uuid4())
+        lease["human_decision"] = decision
+        lease["human_decision_epoch"] = epoch
+        lease["human_decision_evidence_digest"] = digest
+        lease["human_decision_at"] = utc_timestamp()
+        bump_revision(lease)
+        append_history(
+            lease, "HUMAN_DECISION", agent_id, "HUMAN" if role == "human" else "HUMAN_VIA_SUPERVISOR",
+            correlation_id, decision,
+        )
+    return text_tool_result(
+        request_id, f"Managed SLP epoch {epoch} recorded as {decision} for {digest}."
+    )
+
+
+def archive_slp_workspace(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can archive a managed room")
+    required = {"agentId", "expectedWorkEpoch", "expectedRevision"}
+    if set(arguments) != required or not isinstance(arguments.get("agentId"), str):
+        return error_response(
+            request_id, -32602,
+            "archive requires agentId, expectedWorkEpoch, and expectedRevision",
+        )
+    lead_id = arguments["agentId"]
+    lead_state, lead = agent_record_status(lead_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+    if (
+        lead_state != "active"
+        or not isinstance(labels, dict)
+        or labels.get("role") != "lead"
+    ):
+        return denied_tool_result(request_id, "managed Lead authority is unreadable or inactive")
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if not lease or not workflow.governs(lease, agent_id, role):
+            return denied_tool_result(request_id, "target has no active managed SLP lease")
+        if not workflow.lead_matches(lease, lead):
+            return denied_tool_result(request_id, "Lead authority binding drifted")
+        workspace_id = lease.get("workspace_id")
+        if not isinstance(workspace_id, str) or workspace_lifecycle(workspace_id) != "active":
+            return denied_tool_result(request_id, "managed workspace authority is unreadable or inactive")
+        epoch = normalize_lease_epoch(lease, labels)
+        if not expected_version_matches(
+            lease, arguments.get("expectedWorkEpoch"), arguments.get("expectedRevision")
+        ):
+            return denied_tool_result(request_id, "stale managed SLP epoch or revision")
+        digest = lease.get("evidence_digest")
+        if (
+            lease.get("decision_state") != "HANDBACK_READY"
+            or lease.get("handback_epoch") != epoch
+            or lease.get("human_decision") not in {"ACCEPTED", "ABANDONED"}
+            or lease.get("human_decision_epoch") != epoch
+            or not isinstance(digest, str)
+            or lease.get("human_decision_evidence_digest") != digest
+        ):
+            return denied_tool_result(request_id, "managed room lacks a current digest-bound Human decision")
+        if lease.get("human_decision") == "ACCEPTED":
+            verify_candidate(lease, lead)
+        correlation_id = str(uuid.uuid4())
+        lease["decision_state"] = "ARCHIVE_SENDING"
+        lease["delivery_started_at"] = utc_timestamp()
+        lease["delivery_correlation_id"] = correlation_id
+        reservation_revision = bump_revision(lease)
+        append_history(
+            lease, "ARCHIVE", agent_id, "HUMAN" if role == "human" else "HUMAN_VIA_SUPERVISOR",
+            correlation_id, "RESERVED",
+        )
+
+    try:
+        response = upstream_call(
+            agent_id,
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {
+                    "name": "archive_workspace",
+                    "arguments": {"workspaceId": workspace_id},
+                },
+            },
+        )
+    except Exception:
+        with locked_leases() as registry:
+            lease = registry["leases"].get(workspace_id)
+            if (
+                isinstance(lease, dict)
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "ARCHIVE", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        raise
+    delivery_status = delivery_response_status(response)
+    if delivery_status == "uncertain":
+        with locked_leases() as registry:
+            lease = registry["leases"].get(workspace_id)
+            if (
+                isinstance(lease, dict)
+                and lease.get("revision") == reservation_revision
+                and lease.get("delivery_correlation_id") == correlation_id
+            ):
+                append_history(
+                    lease, "ARCHIVE", agent_id, "TRANSPORT", correlation_id, "UNCERTAIN"
+                )
+        return text_tool_result(
+            request_id,
+            "Workspace archive completion is uncertain; it was not retried and requires Human resolution.",
+            is_error=True,
+        )
+    with locked_leases() as registry:
+        lease = registry["leases"].get(workspace_id)
+        if (
+            not isinstance(lease, dict)
+            or lease.get("decision_state") != "ARCHIVE_SENDING"
+            or lease.get("work_epoch") != epoch
+            or lease.get("revision") != reservation_revision
+            or lease.get("delivery_correlation_id") != correlation_id
+        ):
+            return text_tool_result(
+                request_id, "Workspace archive response arrived for a stale reservation.", is_error=True
+            )
+        if delivery_status == "rejected":
+            lease["decision_state"] = "HANDBACK_READY"
+            result = "REJECTED"
+        else:
+            lease["state"] = "released"
+            lease["decision_state"] = "ARCHIVED"
+            lease["release_reason"] = "human_decision_workspace_archived"
+            lease["released_at"] = utc_timestamp()
+            result = "DELIVERED"
+        lease.pop("delivery_started_at", None)
+        lease.pop("delivery_correlation_id", None)
+        bump_revision(lease)
+        append_history(lease, "ARCHIVE", agent_id, "TRANSPORT", correlation_id, result)
+    return text_tool_result(
+        request_id,
+        "Managed workspace archived." if result == "DELIVERED" else "Workspace archive was rejected.",
+        is_error=result != "DELIVERED",
+    )
+
+
+def upstream_tool_call(
+    caller_id: str,
+    request_id: Any,
+    name: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any] | None:
+    payload = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": arguments},
+    }
+    response = upstream_call(caller_id, payload)
+    if tool_not_available(response):
+        response = upstream_call(caller_id, payload, agent_scoped=False)
+    return response
+
+
+def peer_terminal_handback(
+    status_payload: dict[str, Any],
+    activity_payload: dict[str, Any],
+) -> tuple[str, str] | None:
+    snapshot = status_payload.get("snapshot")
+    pending = snapshot.get("pendingPermissions") if isinstance(snapshot, dict) else None
+    content = activity_payload.get("content")
+    content = content if isinstance(content, str) else ""
+    matches = list(
+        re.finditer(
+            r"(?m)^Task outcome: (DONE|BLOCKED_PERMISSION|NEEDS_LEAD_DECISION|FAILED)\s*$",
+            content,
+        )
+    )
+    status = status_payload.get("status")
+    if matches and status in {"idle", "error", "closed"}:
+        match = matches[-1]
+        if re.search(r"(?m)^\[User\]", content[match.end():]):
+            return None  # A prior turn's DONE is not evidence for the current prompt.
+        return match.group(1), content[match.start():].strip()
+    if isinstance(pending, list) and pending:
+        return (
+            "BLOCKED_PERMISSION",
+            "Task outcome: BLOCKED_PERMISSION\n\n"
+            "Paseo reports one or more pending permission requests.",
+        )
+    if status in {"error", "closed"}:
+        return (
+            "FAILED",
+            f"Task outcome: FAILED\n\nPaseo reports terminal agent status {status}.",
+        )
+    return None
+
+
+def callback_owner(registry: dict[str, Any], peer_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    peer = load_agent_record(peer_id)
+    labels = peer.get("labels", {}) if peer else {}
+    if (not peer or peer.get("archivedAt") is not None or labels.get("role") != "peer"
+            or labels.get("callback_transport") != CALLBACK_TRANSPORT
+            or labels.get("room_kind") != "managed_slp"):
+        return None
+    lead_id = labels.get("paseo.parent-agent-id")
+    lease = lead_lease(registry, lead_id)
+    lead = load_agent_record(lead_id) if isinstance(lead_id, str) else None
+    if (not lease or not lead or lead.get("archivedAt") is not None
+            or lease.get("decision_state") != "WORKING"
+            or lease.get("workspace_id") != peer.get("workspaceId")
+            or workspace_lifecycle(lease["workspace_id"]) != "active"
+            or labels.get("work_epoch") != str(lease.get("work_epoch"))):
+        return None
+    brief = lease.get("peer_briefs", {}).get(peer_id)
+    if (not isinstance(brief, dict) or not labels.get("assignment_id")
+            or brief.get("assignment_id") != labels["assignment_id"]
+            or brief.get("work_epoch") != lease["work_epoch"]):
+        return None
+    workflow.require_current_binding(lease)
+    workflow.verify_context(lease, lead, pin=True)
+    return lease, lead, peer
+
+
+def relay_room_callback(peer_id: str) -> dict[str, Any]:
+    """Deliver a real ended-turn report once, fenced by the canonical assignment.
+
+    A crash after reservation is UNCERTAIN, not permission to send again. This
+    receipt is transport evidence; only Lead/Human can settle or accept work.
+    """
+    with locked_leases() as registry:
+        owner = callback_owner(registry, peer_id)
+        if owner is None:
+            return {"state": "IGNORED", "agent_id": peer_id}
+        lease, lead, peer = owner
+        epoch, assignment = lease["work_epoch"], peer["labels"]["assignment_id"]
+        lead_id = lead["id"]
+        receipts = lease.get("callback_deliveries", {})
+        if not isinstance(receipts, dict):
+            raise workflow.WorkflowError("Callback receipt registry is invalid")
+        for prior in receipts.values():
+            if (prior.get("state") == "UNCERTAIN" and prior.get("work_epoch") == epoch
+                    and prior.get("assignment_id") == assignment and prior.get("agent_id") == peer_id):
+                return dict(prior)  # New activity cannot authorize retrying an uncertain send.
+    status = structured_content(upstream_tool_call(lead_id, "relay-status", "get_agent_status", {"agentId": peer_id}))
+    activity = structured_content(upstream_tool_call(lead_id, "relay-activity", "get_agent_activity", {"agentId": peer_id, "limit": 8}))
+    if status is None or activity is None:
+        raise workflow.WorkflowError("Callback evidence is unavailable; no notification sent")
+    if status.get("status") not in {"idle", "error", "closed"}:
+        return {"state": "WAITING", "agent_id": peer_id}
+    count = activity.get("updateCount")
+    if type(count) is not int or count < 1:
+        raise workflow.WorkflowError("Callback activity counter is invalid")
+    terminal = peer_terminal_handback(status, activity)
+    if terminal is None:
+        terminal = ("NEEDS_LEAD_DECISION", "Task outcome: NEEDS_LEAD_DECISION\n\nEnded turn has no usable current handback; inspect its activity. No success is inferred.")
+    outcome, message = terminal
+    key = digest_payload({"peer": peer_id, "epoch": epoch, "assignment": assignment, "activity": count})
+    receipt = {"state": "UNCERTAIN", "agent_id": peer_id, "recipient_id": lead_id,
+               "work_epoch": epoch, "assignment_id": assignment, "activity_update_count": count,
+               "outcome": outcome, "evidence_digest": digest_payload(message), "recorded_at": utc_timestamp()}
+    with locked_leases() as registry:
+        owner = callback_owner(registry, peer_id)
+        if not owner or owner[0]["work_epoch"] != epoch or owner[2]["labels"]["assignment_id"] != assignment:
+            return {"state": "IGNORED", "agent_id": peer_id}
+        lease = owner[0]
+        receipts = lease.setdefault("callback_deliveries", {})
+        if not isinstance(receipts, dict):
+            raise workflow.WorkflowError("Callback receipt registry is invalid")
+        if key in receipts:
+            return dict(receipts[key])
+        if len(receipts) >= 256:
+            raise workflow.WorkflowError("Callback evidence window is full; Human checkpoint required")
+        # Reserve under the same lease lock as governance. Retain uncertain
+        # receipts across crashes; no automatic retry can duplicate a prompt.
+        receipts[key] = receipt
+        lease["revision"] += 1
+    with locked_leases() as registry:
+        owner = callback_owner(registry, peer_id)
+        if not owner or owner[0]["work_epoch"] != epoch or owner[2]["labels"]["assignment_id"] != assignment:
+            return {"state": "IGNORED", "agent_id": peer_id}
+        lease = owner[0]
+        stored = lease["callback_deliveries"][key]
+        # Hold authority stable across the send. Governance cannot withdraw or
+        # reopen this assignment between validation and external notification.
+        try:
+            response = upstream_call("human", {
+                "jsonrpc": "2.0", "id": "relay-delivery", "method": "tools/call",
+                "params": {"name": "send_agent_prompt", "arguments": {
+                    "agentId": lead_id, "background": True, "notifyOnFinish": False,
+                    "prompt": f"[Room callback relay]\nPeer: {peer_id}\nAssignment: {assignment}\nWork epoch: {epoch}\nTransport receipt only; review and settle explicitly.\n\n{message}",
+                }},
+            }, agent_scoped=False)
+            state = {"delivered": "DELIVERED", "rejected": "REJECTED"}.get(delivery_response_status(response), "UNCERTAIN")
+        except (OSError, RuntimeError):
+            state = "UNCERTAIN"
+        stored.update(state=state, completed_at=utc_timestamp())
+        lease["revision"] += 1
+        append_history(lease, "relay_peer_callback", peer_id, "callback-service", key, state)
+        receipt = dict(stored)
+    return receipt
+
+
+def reconcile_room_callbacks() -> dict[str, Any]:
+    with read_locked_leases() as registry:
+        ids = []
+        for lease in registry["leases"].values():
+            if lease.get("state") == "active" and lease.get("decision_state") == "WORKING":
+                ids.extend(lease.get("peer_briefs", {}))
+        ids = list(dict.fromkeys(ids))
+        if len(ids) > 64:
+            raise workflow.WorkflowError("Startup callback reconciliation exceeds its 64-assignment bound")
+    results = []
+    for peer_id in ids:
+        peer = load_agent_record(peer_id)
+        if peer and peer.get("labels", {}).get("callback_transport") == CALLBACK_TRANSPORT:
+            try:
+                results.append(relay_room_callback(peer_id))
+            except (OSError, RuntimeError) as error:
+                results.append({"agent_id": peer_id, "state": "BLOCKED", "reason": str(error)})
+    return {"callbacks": results}
+
+
+def recover_peer_callbacks(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role != "lead":
+        return denied_tool_result(request_id, "only Lead can recover Peer callbacks")
+    if arguments:
+        return error_response(request_id, -32602, "recover_peer_callbacks takes no arguments")
+    lead = load_agent_record(agent_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+    if (
+        not isinstance(lead, dict)
+        or lead.get("archivedAt") is not None
+        or not isinstance(labels, dict)
+        or labels.get("role") != "lead"
+        or labels.get("room_kind") != "managed_slp"
+    ):
+        return denied_tool_result(request_id, "caller is not an active managed Lead")
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, agent_id)
+        if not lease or lease.get("decision_state") != "WORKING":
+            return denied_tool_result(request_id, "managed Lead is not in a working epoch")
+        workspace_id = lease.get("workspace_id")
+        epoch = normalize_lease_epoch(lease, labels)
+        start_revision = normalize_lease_revision(lease)
+        receipts = lease.get("peer_callbacks", {})
+        if not isinstance(receipts, dict):
+            return denied_tool_result(request_id, "Peer callback registry is invalid; failing closed")
+        known_receipts = dict(receipts)
+
+    candidates = []
+    for record in iter_agent_records():
+        peer_labels = record.get("labels")
+        if (
+            record.get("archivedAt") is None
+            and record.get("workspaceId") == workspace_id
+            and isinstance(peer_labels, dict)
+            and peer_labels.get("role") == "peer"
+            and peer_labels.get("paseo.parent-agent-id") == agent_id
+            and peer_labels.get("task_state")
+            in PEER_TERMINAL_OUTCOMES | {"ASSIGNED", "REWORK"}
+        ):
+            peer_epoch = peer_labels.get("work_epoch")
+            if peer_labels.get("room_kind") != "managed_slp" or peer_epoch != str(epoch):
+                return denied_tool_result(
+                    request_id,
+                    f"owned Peer {record.get('id')} is not fenced to work epoch {epoch}",
+                )
+            candidates.append(record)
+
+    callbacks = []
+    new_receipts: dict[str, dict[str, Any]] = {}
+    for peer in candidates:
+        peer_id = peer["id"]
+        peer_labels = peer["labels"]
+        receipt = known_receipts.get(peer_id)
+        if isinstance(receipt, dict):
+            if (
+                receipt.get("work_epoch") != epoch
+                or not isinstance(receipt.get("evidence_digest"), str)
+                or receipt.get("outcome") not in PEER_TERMINAL_OUTCOMES
+            ):
+                return denied_tool_result(
+                    request_id, f"Peer callback receipt for {peer_id} is invalid; failing closed"
+                )
+            if peer_labels.get("task_state") != "REWORK":
+                callbacks.append(dict(receipt, agent_id=peer_id, recovered=True))
+                continue
+        if peer_labels.get("task_state") not in {"ASSIGNED", "REWORK"}:
+            continue
+        status_response = upstream_tool_call(
+            agent_id, request_id, "get_agent_status", {"agentId": peer_id}
+        )
+        status_payload = structured_content(status_response)
+        if status_payload is None:
+            return text_tool_result(
+                request_id,
+                f"Peer status for {peer_id} is unavailable; recovery failed closed.",
+                is_error=True,
+            )
+        activity_response = upstream_tool_call(
+            agent_id,
+            request_id,
+            "get_agent_activity",
+            {"agentId": peer_id, "limit": 8},
+        )
+        activity_payload = structured_content(activity_response)
+        if activity_payload is None:
+            return text_tool_result(
+                request_id,
+                f"Peer activity for {peer_id} is unavailable; recovery failed closed.",
+                is_error=True,
+            )
+        terminal = peer_terminal_handback(status_payload, activity_payload)
+        if terminal is None:
+            continue
+        outcome, handback_message = terminal
+        update_count = activity_payload.get("updateCount")
+        if (
+            not isinstance(update_count, int)
+            or isinstance(update_count, bool)
+            or update_count < 1
+        ):
+            return text_tool_result(
+                request_id,
+                f"Peer activity update count for {peer_id} is invalid; recovery failed closed.",
+                is_error=True,
+            )
+        prior_receipt = known_receipts.get(peer_id)
+        if (
+            isinstance(prior_receipt, dict)
+            and peer_labels.get("task_state") == "REWORK"
+            and update_count <= prior_receipt.get("activity_update_count", 0)
+        ):
+            continue
+        receipt = {
+            "work_epoch": epoch,
+            "outcome": outcome,
+            "evidence_digest": digest_payload(
+                {
+                    "agent_id": peer_id,
+                    "activity_update_count": update_count,
+                    "handback_message": handback_message,
+                    "work_epoch": epoch,
+                }
+            ),
+            "activity_update_count": update_count,
+            "handback_message": handback_message,
+            "recovered_at": utc_timestamp(),
+        }
+        new_receipts[peer_id] = receipt
+        callbacks.append(dict(receipt, agent_id=peer_id, recovered=True))
+
+    if new_receipts:
+        with locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            if (
+                not lease
+                or lease.get("decision_state") != "WORKING"
+                or lease.get("work_epoch") != epoch
+                or normalize_lease_revision(lease) != start_revision
+            ):
+                return text_tool_result(
+                    request_id,
+                    "Peer callbacks were found but the managed epoch changed; nothing was recorded.",
+                    is_error=True,
+                )
+            stored = lease.setdefault("peer_callbacks", {})
+            if not isinstance(stored, dict):
+                return denied_tool_result(
+                    request_id, "Peer callback registry is invalid; failing closed"
+                )
+            for peer_id, receipt in new_receipts.items():
+                stored[peer_id] = receipt
+            bump_revision(lease)
+            for peer_id, receipt in new_receipts.items():
+                append_history(
+                    lease,
+                    "PEER_CALLBACK_RECOVERY",
+                    agent_id,
+                    "LEAD",
+                    receipt["evidence_digest"],
+                    receipt["outcome"],
+                )
+
+        for peer in candidates:
+            peer_id = peer["id"]
+            receipt = new_receipts.get(peer_id)
+            if receipt is None:
+                continue
+            next_labels = dict(peer["labels"])
+            next_labels["task_state"] = receipt["outcome"]
+            label_response = upstream_tool_call(
+                agent_id,
+                request_id,
+                "update_agent",
+                {"agentId": peer_id, "labels": next_labels},
+            )
+            if response_is_error(label_response):
+                for callback in callbacks:
+                    if callback["agent_id"] == peer_id:
+                        callback["label_update"] = False
+            else:
+                for callback in callbacks:
+                    if callback["agent_id"] == peer_id:
+                        callback["label_update"] = True
+
+    return text_tool_result(
+        request_id,
+        json.dumps({"callbacks": callbacks}, sort_keys=True),
+    )
+
+
+def inspect_peer_attention(
+    agent_id: str, role: str, request_id: Any, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    if role != "lead":
+        return denied_tool_result(request_id, "only the bound Lead may inspect Peer attention")
+    if arguments:
+        return error_response(request_id, -32602, "inspect_peer_attention takes no arguments")
+    with read_locked_leases() as registry:
+        authority = _attention_authority(registry, agent_id, agent_id, role)
+        if authority is None:
+            return denied_tool_result(request_id, "caller has no active working room authority")
+        lease, _ = authority
+        epoch = lease["work_epoch"]
+        revision = normalize_lease_revision(lease)
+        workspace_id = lease["workspace_id"]
+        callback_receipts = lease.get("peer_callbacks", {})
+        if not isinstance(callback_receipts, dict):
+            return denied_tool_result(request_id, "Peer callback registry is invalid")
+        callback_receipts = dict(callback_receipts)
+    candidates = []
+    for peer in iter_agent_records():
+        labels = peer.get("labels")
+        if (
+            peer.get("archivedAt") is None
+            and peer.get("workspaceId") == workspace_id
+            and isinstance(labels, dict)
+            and labels.get("role") == "peer"
+            and labels.get("room_kind") == "managed_slp"
+            and labels.get("paseo.parent-agent-id") == agent_id
+            and labels.get("work_epoch") == str(epoch)
+            and labels.get("task_state") in {"ASSIGNED", "REWORK"}
+        ):
+            candidates.append(peer)
+    if len(candidates) > 32:
+        return denied_tool_result(request_id, "too many current Peer assignments for one bounded inspection")
+    signals = []
+    for peer in candidates:
+        peer_id = peer["id"]
+        status = structured_content(upstream_tool_call(
+            agent_id, request_id, "get_agent_status", {"agentId": peer_id}
+        ))
+        activity = structured_content(upstream_tool_call(
+            agent_id, request_id, "get_agent_activity", {"agentId": peer_id, "limit": 8}
+        ))
+        refreshed = load_agent_record(peer_id)
+        if refreshed != peer:
+            signals.append({"peer_agent_id": peer_id, "signal": "PEER_RECORD_CHANGED"})
+            continue
+        if status is None or activity is None:
+            signals.append({"peer_agent_id": peer_id, "signal": "ACTIVITY_UNAVAILABLE"})
+            continue
+        prior = callback_receipts.get(peer_id)
+        update_count = activity.get("updateCount")
+        if (
+            peer["labels"].get("task_state") == "REWORK" and isinstance(prior, dict)
+            and type(update_count) is int and update_count <= prior.get("activity_update_count", -1)
+        ):
+            continue
+        terminal = peer_terminal_handback(status, activity)
+        stale_terminal = (
+            peer["labels"].get("task_state") == "REWORK"
+            and isinstance(prior, dict)
+            and terminal is not None
+            and terminal[1] == prior.get("handback_message")
+        )
+        signal = attention.peer_turn_signal(
+            status, activity, has_terminal_handback=terminal is not None and not stale_terminal
+        )
+        if signal is not None:
+            signals.append({
+                "peer_agent_id": peer_id,
+                "assignment_id": peer["labels"].get("assignment_id"),
+                "activity_update_count": update_count,
+                "signal": signal,
+            })
+    with read_locked_leases() as registry:
+        authority = _attention_authority(registry, agent_id, agent_id, role)
+        if authority is None or authority[0].get("work_epoch") != epoch or normalize_lease_revision(authority[0]) != revision:
+            return text_tool_result(request_id, "Managed room changed during attention inspection; retry explicitly.", is_error=True)
+    return text_tool_result(
+        request_id,
+        json.dumps({"work_epoch": epoch, "revision": revision, "signals": signals,
+                    "note": "Signals are diagnostic; idle never completes or accepts a Peer assignment."}, sort_keys=True),
+    )
+
+
+def ownership_authority(
+    record: dict[str, Any],
+    supervisor_id: str,
+    lease: dict[str, Any] | None,
+) -> dict[str, Any]:
+    labels = record.get("labels")
+    labels = labels if isinstance(labels, dict) else {}
+    workspace_id = record.get("workspaceId")
+    workspace_state = (
+        workspace_lifecycle(workspace_id) if isinstance(workspace_id, str) else "unreadable"
+    )
+    active_lease = lease if isinstance(lease, dict) and lease.get("state") == "active" else None
+    authority = {
+        "agent_id": record.get("id"),
+        "workspace_id": workspace_id,
+        "provider": record.get("provider"),
+        "parent_agent_id": labels.get("paseo.parent-agent-id"),
+        "supervisor_agent_id": supervisor_id,
+        "workspace_state": workspace_state,
+        "archived": record.get("archivedAt") is not None,
+        "lease_lead_agent_id": active_lease.get("lead_agent_id") if active_lease else None,
+        "lease_revision": active_lease.get("revision", 1) if active_lease else None,
+        "lease_decision_state": (
+            active_lease.get("decision_state") if active_lease else None
+        ),
+        "lease_supervisor_agent_id": (
+            active_lease.get("supervisor_agent_id") if active_lease else None
+        ),
+        "legacy_orphan": (
+            active_lease.get("legacy_orphan") is True if active_lease else False
+        ),
+        "room_kind": labels.get("room_kind"),
+    }
+    return authority
+
+
+def inspect_slp_ownership(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role != "supervisor":
+        return denied_tool_result(request_id, "only Supervisor can inspect SLP ownership")
+    if arguments:
+        return error_response(request_id, -32602, "inspect_slp_ownership takes no arguments")
+    with locked_leases() as registry:
+        leases = {
+            workspace_id: dict(lease)
+            for workspace_id, lease in registry["leases"].items()
+            if isinstance(lease, dict)
+        }
+    candidates = []
+    for record in iter_agent_records():
+        labels = record.get("labels")
+        labels = labels if isinstance(labels, dict) else {}
+        if record.get("provider") not in CUSTOM_LEAD_PROVIDERS:
+            continue
+        workspace_id = record.get("workspaceId")
+        lease = leases.get(workspace_id) if isinstance(workspace_id, str) else None
+        authority = ownership_authority(record, agent_id, lease)
+        managed = (
+            isinstance(lease, dict)
+            and lease.get("state") == "active"
+            and lease.get("room_kind") == "managed_slp"
+            and lease.get("lead_agent_id") == record.get("id")
+            and lease.get("legacy_orphan") is not True
+            and lease.get("supervisor_agent_id") == agent_id
+            and workflow.lead_matches(lease, record)
+        )
+        parent_id = labels.get("paseo.parent-agent-id")
+        if authority["archived"]:
+            classification = "archived_record"
+        elif managed:
+            classification = "managed_lease_holder"
+        elif not isinstance(parent_id, str) or not parent_id:
+            classification = "unparented_orphan"
+        elif parent_id != agent_id:
+            classification = "foreign_parent"
+        else:
+            classification = "legacy_orphan"
+        candidates.append(
+            {
+                **authority,
+                "classification": classification,
+                "authority_digest": digest_payload(authority),
+            }
+        )
+    return text_tool_result(
+        request_id, json.dumps({"candidates": candidates}, sort_keys=True)
+    )
+
+
+def retire_legacy_lead(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role != "supervisor":
+        return denied_tool_result(request_id, "only Supervisor can retire a legacy Lead")
+    required = {"agentId", "workspaceId", "authorityDigest"}
+    if set(arguments) != required:
+        return error_response(
+            request_id,
+            -32602,
+            "retirement requires agentId, workspaceId, and authorityDigest",
+        )
+    lead_id = arguments.get("agentId")
+    workspace_id = arguments.get("workspaceId")
+    expected_digest = arguments.get("authorityDigest")
+    if (
+        not isinstance(lead_id, str)
+        or not isinstance(workspace_id, str)
+        or not isinstance(expected_digest, str)
+    ):
+        return error_response(request_id, -32602, "invalid legacy Lead retirement fence")
+    record_state, lead = agent_record_status(lead_id)
+    if record_state != "active" or not isinstance(lead, dict):
+        return denied_tool_result(request_id, "legacy Lead is not an active persisted record")
+    labels = lead.get("labels")
+    labels = labels if isinstance(labels, dict) else {}
+    if (
+        lead.get("provider") not in CUSTOM_LEAD_PROVIDERS
+        or lead.get("workspaceId") != workspace_id
+        or labels.get("paseo.parent-agent-id") != agent_id
+    ):
+        return denied_tool_result(
+            request_id, "legacy Lead does not match caller parentage and workspace authority"
+        )
+    with locked_leases() as registry:
+        lease = registry["leases"].get(workspace_id)
+        lease = dict(lease) if isinstance(lease, dict) else None
+    authority = ownership_authority(lead, agent_id, lease)
+    if digest_payload(authority) != expected_digest:
+        return denied_tool_result(request_id, "stale legacy Lead authority digest")
+    if authority["workspace_state"] not in {"active", "archived"}:
+        return denied_tool_result(request_id, "legacy Lead workspace authority is unreadable")
+    if (
+        isinstance(lease, dict)
+        and lease.get("state") == "active"
+        and lease.get("room_kind") == "managed_slp"
+        and lease.get("lead_agent_id") == lead_id
+        and lease.get("legacy_orphan") is not True
+    ):
+        return denied_tool_result(
+            request_id, "target is the managed lease holder; use protected managed lifecycle"
+        )
+
+    correlation_id = str(uuid.uuid4())
+    history_authority = {
+        "work_epoch": lease.get("work_epoch") if isinstance(lease, dict) else None,
+        "revision": lease.get("revision", 1) if isinstance(lease, dict) else 1,
+    }
+    append_history(
+        history_authority,
+        "LEGACY_LEAD_RETIRE",
+        agent_id,
+        "HUMAN_VIA_SUPERVISOR",
+        correlation_id,
+        "RESERVED",
+    )
+    response = upstream_tool_call(
+        agent_id, request_id, "archive_agent", {"agentId": lead_id}
+    )
+    delivery_status = delivery_response_status(response)
+    result = (
+        "DELIVERED"
+        if delivery_status == "delivered"
+        else "REJECTED"
+        if delivery_status == "rejected"
+        else "UNCERTAIN"
+    )
+    append_history(
+        history_authority,
+        "LEGACY_LEAD_RETIRE",
+        agent_id,
+        "TRANSPORT",
+        correlation_id,
+        result,
+    )
+    if result != "DELIVERED":
+        return text_tool_result(
+            request_id,
+            "Legacy Lead retirement was rejected."
+            if result == "REJECTED"
+            else "Legacy Lead retirement is uncertain; inspect persisted agent authority before any retry.",
+            is_error=True,
+        )
+    if (
+        isinstance(lease, dict)
+        and lease.get("state") == "active"
+        and lease.get("lead_agent_id") == lead_id
+        and lease.get("legacy_orphan") is True
+    ):
+        with locked_leases() as registry:
+            stored = registry["leases"].get(workspace_id)
+            if (
+                not isinstance(stored, dict)
+                or stored.get("state") != "active"
+                or stored.get("lead_agent_id") != lead_id
+                or stored.get("legacy_orphan") is not True
+                or digest_payload(ownership_authority(lead, agent_id, stored))
+                != expected_digest
+            ):
+                return text_tool_result(
+                    request_id,
+                    "Legacy Lead was archived but its cleanup fence changed unexpectedly.",
+                    is_error=True,
+                )
+            stored["state"] = "released"
+            stored["decision_state"] = "LEGACY_RETIRED"
+            stored["released_at"] = utc_timestamp()
+            stored["release_reason"] = "legacy_lead_soft_archived"
+            bump_revision(stored)
+    return text_tool_result(
+        request_id,
+        f"Legacy Lead {lead_id} was soft-archived with authority digest {expected_digest}.",
+    )
+
+
+def recover_working_lead(
+    agent_id: str,
+    role: str,
+    request_id: Any,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    if role not in {"supervisor", "human"}:
+        return denied_tool_result(request_id, "only Supervisor can recover a working Lead")
+    if set(arguments) != {"agentId", "prompt"}:
+        return error_response(request_id, -32602, "recovery requires agentId and prompt")
+    lead_id = arguments.get("agentId")
+    prompt = arguments.get("prompt")
+    if not isinstance(lead_id, str) or not isinstance(prompt, str) or not prompt.strip():
+        return error_response(request_id, -32602, "recovery target and prompt must be non-empty")
+
+    lead = load_agent_record(lead_id)
+    labels = lead.get("labels") if isinstance(lead, dict) else None
+    if (
+        not isinstance(lead, dict)
+        or lead.get("archivedAt") is not None
+        or not isinstance(labels, dict)
+        or labels.get("role") != "lead"
+        or labels.get("room_kind") != "managed_slp"
+        or labels.get("task_state") != "LEASED"
+    ):
+        return denied_tool_result(request_id, "target is not this Supervisor's active leased Lead")
+
+    with locked_leases() as registry:
+        lease = lead_lease(registry, lead_id)
+        if lease and not workflow.lead_matches(lease, lead):
+            return denied_tool_result(request_id, "Lead authority binding drifted")
+        if (
+            not lease
+            or lease.get("state") != "active"
+            or lease.get("decision_state") != "WORKING"
+            or not workflow.governs(lease, agent_id, role)
+        ):
+            return denied_tool_result(request_id, "managed Lead is not in recoverable WORKING state")
+        correlation_id = str(uuid.uuid4())
+        append_history(
+            lease, "RECOVER", agent_id, "HUMAN" if role == "human" else "HUMAN_VIA_SUPERVISOR",
+            correlation_id, "REQUESTED",
+        )
 
     response = upstream_call(
         agent_id,
@@ -366,58 +3659,17 @@ def handback_to_parent(
             "params": {
                 "name": "send_agent_prompt",
                 "arguments": {
-                    "agentId": parent_id,
-                    "prompt": f"Final Lead handback:\n\n{message.strip()}",
+                    "agentId": lead_id,
+                    "prompt": prompt.strip(),
                     "background": True,
                     "notifyOnFinish": False,
                 },
             },
         },
     )
-    if not response or "error" in response:
-        return text_tool_result(
-            request_id,
-            "Final handback could not be delivered to the parent governance seat.",
-            is_error=True,
-        )
-    result = response.get("result")
-    if isinstance(result, dict) and result.get("isError"):
-        return text_tool_result(
-            request_id,
-            "Final handback was rejected by the parent governance seat.",
-            is_error=True,
-        )
-    updated_labels = dict(labels)
-    updated_labels["task_state"] = "HANDBACK_READY"
-    label_response = upstream_call(
-        agent_id,
-        {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "tools/call",
-            "params": {
-                "name": "update_agent",
-                "arguments": {
-                    "agentId": agent_id,
-                    "labels": updated_labels,
-                },
-            },
-        },
-    )
-    label_result = label_response.get("result") if isinstance(label_response, dict) else None
-    if (
-        not isinstance(label_response, dict)
-        or "error" in label_response
-        or isinstance(label_result, dict) and label_result.get("isError")
-    ):
-        return text_tool_result(
-            request_id,
-            "Final handback delivered, but Lead lifecycle state could not be updated.",
-        )
-    return text_tool_result(
-        request_id,
-        "Final handback delivered; Lead is now HANDBACK_READY.",
-    )
+    if response is None:
+        return error_response(request_id, -32603, "Lead recovery returned no response")
+    return response
 
 
 def call_tool(
@@ -430,10 +3682,93 @@ def call_tool(
     arguments = params.get("arguments", {})
     if not isinstance(name, str) or not isinstance(arguments, dict):
         return error_response(request_id, -32602, "tools/call requires name and object arguments")
-    if name == HAND_BACK_TOOL["name"]:
+    if role == "watcher":
+        watcher = load_agent_record(agent_id)
+        if not isinstance(watcher, dict) or not watcher_provider(watcher):
+            return denied_tool_result(request_id, "watcher provider identity required")
+        if name not in {"list_agents", "list_workspaces", LIST_ROOM_ATTENTION_TOOL["name"], LIST_ROOM_OBSERVATIONS_TOOL["name"]}:
+            return denied_tool_result(request_id, "Watcher may use read-only room inspection tools only")
+    if role == "lead" and name not in {LIST_ROOM_OBSERVATIONS_TOOL["name"], INSPECT_WORK_TASKS_TOOL["name"]}:
+        with locked_leases() as registry:
+            lease = lead_lease(registry, agent_id)
+            record = load_agent_record(agent_id)
+            if lease and record:
+                workflow.verify_context(lease, record, pin=True)
+                if lease.get("execution_mode") == "L" and name == "create_agent":
+                    return denied_tool_result(request_id, "L mode cannot dispatch Peer; bind a new LP/SLP task for delegation")
+    if name == WORK_CONTEXT_TOOL["name"]:
+        return inspect_work_context(agent_id, role, request_id, arguments)
+    if name in {item["name"] for item in TASK_TOOLS}:
+        return work_task_operation(agent_id, role, request_id, arguments, name)
+    if name == WORK_CANDIDATE_TOOL["name"]:
+        return inspect_work_context(agent_id, role, request_id, arguments, candidate=True)
+    if name == PEER_REPORT_TOOL["name"]:
+        return record_peer_report(agent_id, role, request_id, arguments)
+    if name == OPEN_ROOM_ASK_TOOL["name"]:
+        return open_room_ask(agent_id, role, request_id, arguments)
+    if name == ANSWER_ROOM_ASK_TOOL["name"]:
+        return answer_room_ask(agent_id, role, request_id, arguments)
+    if name == LIST_ROOM_ATTENTION_TOOL["name"]:
+        return list_room_attention(agent_id, role, request_id, arguments)
+    if name == LIST_ROOM_OBSERVATIONS_TOOL["name"]:
+        return list_room_observations(agent_id, role, request_id, arguments)
+    if name == RESOLVE_PEER_REPORT_TOOL["name"]:
+        return resolve_peer_report(agent_id, role, request_id, arguments)
+    if name == STEER_ROOM_PEER_TOOL["name"]:
+        return steer_room_peer(agent_id, role, request_id, arguments)
+    if name == INSPECT_PEER_ATTENTION_TOOL["name"]:
+        return inspect_peer_attention(agent_id, role, request_id, arguments)
+    if name in {HAND_BACK_TOOL["name"], SUBMIT_RESULT_TOOL["name"]}:
         return handback_to_parent(agent_id, role, request_id, arguments)
+    if name == LIST_SLP_DECISIONS_TOOL["name"]:
+        return list_slp_decisions(agent_id, role, request_id, arguments)
+    if name == REOPEN_WORK_EPOCH_TOOL["name"]:
+        return reopen_work_epoch(agent_id, role, request_id, arguments)
+    if name == RESOLVE_SLP_DELIVERY_TOOL["name"]:
+        return resolve_slp_delivery(agent_id, role, request_id, arguments)
+    if name == RECORD_SLP_DECISION_TOOL["name"]:
+        return record_slp_decision(agent_id, role, request_id, arguments)
+    if name == ARCHIVE_SLP_WORKSPACE_TOOL["name"]:
+        return archive_slp_workspace(agent_id, role, request_id, arguments)
+    if name == RECOVER_WORKING_LEAD_TOOL["name"]:
+        return recover_working_lead(agent_id, role, request_id, arguments)
+    if name == RECOVER_PEER_CALLBACKS_TOOL["name"]:
+        return recover_peer_callbacks(agent_id, role, request_id, arguments)
+    if name == INSPECT_SLP_OWNERSHIP_TOOL["name"]:
+        return inspect_slp_ownership(agent_id, role, request_id, arguments)
+    if name == RETIRE_LEGACY_LEAD_TOOL["name"]:
+        return retire_legacy_lead(agent_id, role, request_id, arguments)
     if not allowed_tool(role, name):
         return denied_tool_result(request_id, f"{role} cannot call Paseo tool {name}")
+
+    relay_selected = False
+    if name == "create_agent" and isinstance(arguments.get("labels"), dict):
+        arguments = dict(arguments, labels=dict(arguments["labels"]))
+        arguments["labels"].pop("callback_transport", None)  # proxy-owned capability
+    if needs_finish_callback(name, arguments) and not (role == "supervisor" and name == "create_agent"):
+        if name == "send_agent_prompt":
+            target = load_agent_record(arguments.get("agentId", ""))
+            if target and target.get("labels", {}).get("callback_transport") == CALLBACK_TRANSPORT and not callback_relay_ready():
+                return denied_tool_result(request_id, "Pinned callback relay is unavailable; dispatch was not sent")
+        catalog = upstream_call(agent_id, {
+            "jsonrpc": "2.0", "id": request_id,
+            "method": "tools/list", "params": {},
+        }, allow_unscoped_fallback=False)
+        catalog_result = catalog.get("result") if isinstance(catalog, dict) else None
+        scoped_tools = catalog_result.get("tools") if isinstance(catalog_result, dict) else None
+        existing_relay = name == "send_agent_prompt" and relay_dispatch_allowed(agent_id, name, arguments)
+        if existing_relay or not isinstance(scoped_tools, list) or not any(
+            isinstance(tool, dict) and tool.get("name") == name for tool in scoped_tools
+        ):
+            if role == "lead" and callback_relay_ready():
+                arguments = dict(arguments)
+                if name == "create_agent":
+                    arguments["labels"] = dict(arguments.get("labels", {}), callback_transport=CALLBACK_TRANSPORT)
+                if not relay_dispatch_allowed(agent_id, name, arguments):
+                    return denied_tool_result(request_id, "Peer has no fenced callback transport; dispatch was not sent")
+                relay_selected = True
+            else:
+                return denied_tool_result(request_id, "Native callback unavailable and trusted relay is not ready; dispatch was not sent")
 
     tool_use_id = f"proxy-{uuid.uuid4()}"
     allowed, reason, guarded_arguments = run_guard(
@@ -447,15 +3782,30 @@ def call_tool(
     if not allowed:
         return denied_tool_result(request_id, reason or "denied")
 
+    payload = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "tools/call",
+        "params": {"name": name, "arguments": guarded_arguments},
+    }
+    if relay_selected:
+        payload["params"]["arguments"] = dict(unscoped_arguments(agent_id, name, guarded_arguments), notifyOnFinish=False)
     response = upstream_call(
         agent_id,
-        {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": guarded_arguments},
-        },
+        payload,
+        agent_scoped=not relay_selected,
     )
+    if tool_not_available(response):
+        fallback_arguments = unscoped_arguments(agent_id, name, guarded_arguments)
+        fallback_payload = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": fallback_arguments},
+            }
+        response = unscoped_callback_error(agent_id, fallback_payload)
+        if response is None:
+            response = upstream_call(agent_id, fallback_payload, agent_scoped=False)
     if response is None:
         response = error_response(request_id, -32603, "Paseo MCP returned no response")
     run_guard(
@@ -482,7 +3832,7 @@ def handle(agent_id: str, role: str, request: dict[str, Any]) -> dict[str, Any] 
             "result": {
                 "protocolVersion": version or "2025-06-18",
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": f"paseo-room-{role}", "version": "1.1.0"},
+                "serverInfo": {"name": f"paseo-room-{role}", "version": "1.3.0"},
             },
         }
     if method == "notifications/initialized":
@@ -509,8 +3859,8 @@ def handle(agent_id: str, role: str, request: dict[str, Any]) -> dict[str, Any] 
 
 
 def main() -> None:
-    if len(sys.argv) != 2 or sys.argv[1] not in {"supervisor", "lead", "peer"}:
-        fail("usage: paseo-room-mcp supervisor|lead|peer")
+    if len(sys.argv) != 2 or sys.argv[1] not in {"supervisor", "lead", "peer", "watcher"}:
+        fail("usage: paseo-room-mcp supervisor|lead|peer|watcher")
     role = sys.argv[1]
     agent_id = resolve_agent_id()
     while True:

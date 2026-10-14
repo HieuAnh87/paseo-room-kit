@@ -17,13 +17,20 @@ Paseo daemon có:
 }
 ```
 
-Paseo `0.2.5` không hỗ trợ `injectIntoProviders`. Field này từng có trong config local nhưng chỉ được schema giữ như unknown field và không có implementation; nó đã bị xóa. Vì global injection không chọn được role, config mới tắt `injectIntoAgents`.
+Paseo `0.9.1` hỗ trợ policy theo provider qua
+`agents.providers.<id>.paseoTools`. Canonical config vừa giữ
+`injectIntoAgents=false`, vừa đặt `paseoTools.enabled=false` cho cả chín
+internal custom providers. Vì vậy nếu global injection vô tình bật về sau,
+những provider này vẫn không nhận native unrestricted catalog.
 
 Selective authority được cấp lại có chủ đích:
 
-- `codex-supervisor`, `claude-supervisor`, `opencode-supervisor`, `codex-lead`, `claude-lead` và `opencode-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
-- proxy forward tới `http://127.0.0.1:6767/mcp/agents?callerAgentId=...` sau khi kiểm tra role, route, ownership và lease;
-- Lead còn thấy synthetic tool `handback_to_parent`; tool tự resolve đúng parent Supervisor và không nhận `agentId` từ Lead;
+- `codex-supervisor`, `claude-supervisor`, `codex-lead`, `claude-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
+- proxy thử caller-scoped `/mcp/agents?callerAgentId=...`; khi per-provider
+  policy làm catalog này rỗng/method-not-found, proxy dùng top-level catalog,
+  khôi phục chỉ caller workspace/parent defaults, rồi role-filter và guard;
+- Lead thấy protected `handback_to_parent` và `recover_peer_callbacks`;
+  Supervisor thấy decision/ownership operations;
 - `codex-peer` không có Paseo MCP server;
 - OpenCode Supervisor/Lead deny native `task`, dùng role proxy cho `paseo_*`; OpenCode Peer deny cả `paseo_*` và direct Paseo CLI;
 - ACP catalog probe chạy trước khi có agent identity chỉ thấy MCP catalog rỗng; session thật phải resolve được `PASEO_AGENT_ID` mới nhận control tools;
@@ -56,9 +63,11 @@ Chi tiết command/env thật chỉ đọc từ config local có kiểm soát. [
 3. Khi debug MCP, xác nhận provider nào nhận được server: role proxy và baseline Codex là hai đường khác nhau.
 4. Database/observability MCP có thể có quyền mạnh; không coi tool availability là authorization cho product decision.
 5. `MCP server available` không đồng nghĩa `tool result accepted`; Lead vẫn cần validate evidence.
-6. Không thêm lại `injectIntoProviders`; Paseo hiện không đọc field đó.
-7. Không bật lại global `injectIntoAgents` nếu vẫn cần Peer không có control-plane tools.
+6. Không thêm lại field lịch sử `injectIntoProviders`; dùng
+   `paseoTools.enabled=false` đúng schema 0.9.1.
+7. Global `injectIntoAgents` vẫn nên fail closed ở `false`; per-provider deny
+   là defense in depth, không phải lý do mở global injection.
 
 ## Vì sao codebase search không nhất thiết spawn model?
 
-`rg`, GitNexus hoặc MCP call là tool execution trong agent hiện tại. Chỉ khi Lead tạo một delegated `search` Peer thì Luna Low mới là model riêng. Đây là lý do routing docs tách “direct search” và “delegated search”.
+`rg`, GitNexus hoặc MCP call là tool execution trong agent hiện tại. Chỉ khi Lead tạo một delegated `search` Peer thì GPT-6 Luna Medium mới là model riêng. Đây là lý do routing docs tách “direct search” và “delegated search”.

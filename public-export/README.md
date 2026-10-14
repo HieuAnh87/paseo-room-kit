@@ -3,7 +3,8 @@
 This is the reusable, generic portion of a role-aware engineering room:
 
 ```text
-Human → Supervisor → Lead → Peer
+Human → Lead → Peer
+        ↑ optional bound Supervisor governance
 ```
 
 The export contains the actual launchers, role configuration templates, hooks,
@@ -35,6 +36,30 @@ PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_public_artifact.py /tmp/public-r
 
 The exporter requires a caller-selected new or empty directory, preserves
 executable modes, and performs no Git initialization, remote changes, or push.
+The installer manages role-only PATH guards in `~/.zshenv`, `~/.zprofile`, and `~/.zshrc`
+without restarting the Paseo daemon; ordinary human shells retain the real
+Paseo CLI.
+Managed lifecycle uses a version-2 lease registry with room kind, work epoch,
+revision, and evidence digest. Native Peer callbacks remain primary;
+`recover_peer_callbacks` is the one-shot digest-deduplicated recovery path.
+Every internal custom provider sets Paseo 0.11.2 `paseoTools.enabled=false`, so
+the role-aware proxy remains its only control surface if global injection is
+enabled later. Legacy Lead cleanup is workspace/parentage/lease fenced and does
+not trust native idle status. A future plugin may only be a thin UI over these
+protected operations.
 Public upstream references are limited to ordinary documentation links such
 as the [Paseo documentation](https://paseo.sh/docs) and an
 [upstream repository](https://github.com/example/upstream).
+
+## Repository workflow and direct authority
+
+From an ordinary owner shell, preview then create missing project tactics:
+
+```bash
+paseo-room-workflow init /path/to/project
+paseo-room-workflow init /path/to/project --apply
+```
+
+Review `.orchestration/workspace-protocol.md` and `workflow.json` before binding an existing root Lead. Preview with `paseo-room-workflow bind --lead-id LEAD_ID --task-class bounded`, then add `--apply`. Add `--supervisor-id SUPERVISOR_ID` for an independent observer; neither form reparents agents. The compatible Supervisor-created Lead path remains available.
+
+`bindings` shows authority versions; `decisions` shows Human choices. `decide`, `reopen`, `resolve`, `archive` and `withdraw` take a JSON request and preview unless `--apply` is supplied. Common gates bind protocol, runtime metadata, report correlation and review candidate across providers. No repository policy preserves legacy behavior; initialize it before binding to enable candidate gates. See [workflow protocol](protocols/WORKFLOW_PROTOCOL.md) for schemas and limits.

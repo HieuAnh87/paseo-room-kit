@@ -1,18 +1,22 @@
 # 04 — Lifecycle và communication
 
+> Authority update: Supervisor is optional. Direct Human→root Lead and an independently bound root Supervisor observer use the same canonical lease and protected epoch operations as the compatible parented bootstrap. Parentage alone is not authority. `submit_work_result` resolves the active binding; direct mode persists a Human-queue receipt. See the shared [workflow protocol](../protocols/WORKFLOW_PROTOCOL.md) for repository gates, correlated reports, candidate review and owner-shell commands.
+
+
 ## Luồng một objective
 
 ```text
 1. Human gửi objective cho Supervisor
 2. Supervisor xác định workspace và ownership hiện tại
-3. Nếu chưa có Lead khỏe, Supervisor bootstrap đúng một Lead: stable Sol mặc định hoặc Sonnet pilot khi Human yêu cầu
+3. Nếu chưa có Lead khỏe, Supervisor tự chọn Codex Sol XHigh hoặc Claude Opus 5.5 XHigh cho objective; Human có thể chỉ định
 4. Supervisor relay objective + accepted decisions + constraints + reporting contract
 5. Lead phân rã engineering và quyết định có cần Peer hay không
 6. Lead tạo bounded Peer theo category/model phù hợp
 7. Peer làm việc, validate phần được giao, trả handback
 8. Lead xem evidence/counterevidence, resolve dissent, accept engineering result
-9. Lead gọi `handback_to_parent` đúng một lần với final validated report
-10. Supervisor kiểm tra governance/lifecycle và báo lại Human
+9. Lead gọi `handback_to_parent` đúng một lần cho current work epoch
+10. Supervisor dùng decision queue để xin Human accept, abandon hoặc bounded follow-up
+11. Protected operation record decision/reopen/resolve/archive với epoch+revision fencing
 ```
 
 ## Cơ chế trao đổi
@@ -59,9 +63,14 @@ Requested resolution (nếu có)
 
 ### Lead → Supervisor
 
-Sau khi tất cả Peer callback cần thiết đã được resolve và evidence đã được validate, Lead gọi tool hẹp `handback_to_parent` đúng một lần. Lead chỉ truyền report; proxy tự resolve parent Supervisor từ metadata Paseo và không lộ parent ID cho Lead.
+Sau khi tất cả Peer callback cần thiết đã được resolve và evidence đã được validate, Lead gọi tool hẹp `handback_to_parent` đúng một lần. Lead truyền report và candidateDigest khi gated; proxy resolve governance từ authority binding, hoặc ghi receipt trong Human queue ở direct mode và không lộ parent ID cho Lead.
 
 Điều này cần explicit vì `notifyOnFinish` gắn với từng create/prompt turn. Callback Peer tạo một turn mới cho Lead, nhưng turn đó không kế thừa callback của turn Lead ban đầu lên Supervisor. `handback_to_parent` khép chuỗi mà không poll, heartbeat hoặc generic upward messaging.
+
+Nếu expected Peer callback không render, Lead dùng `recover_peer_callbacks`
+một lần. Proxy đọc durable Paseo status/activity, kiểm tra exact
+parent/workspace/current epoch và lưu terminal message + digest receipt trong
+lease. Lần gọi sau trả receipt đã lưu thay vì đọc activity lại.
 
 Lead báo material uncertainty, ownership collision, product trade-off hoặc vấn đề vượt authority trong report này. Lead không tự mở direct Human chat.
 
@@ -92,7 +101,8 @@ Paseo có ba khái niệm cần tách:
 | heartbeat | gửi prompt định kỳ cho assistant/monitoring channel |
 | schedule | tạo agent fresh theo cron |
 
-Polling thủ công chỉ nên dùng để điều tra bounded state hoặc khi không có event. Nó không phải handback protocol và không được dùng để spin loop kiểm tra agent mỗi vài giây.
+Polling thủ công chỉ nên dùng để điều tra bounded state. Missing callback dùng
+protected recovery một lần; không spin loop kiểm tra agent mỗi vài giây.
 
 Tại snapshot hiện tại không có schedule/loop định kỳ đang được ghi nhận. Heartbeat nếu cần sau này dùng cho monitor/reminder, không dùng để biến Supervisor thành task dispatcher.
 

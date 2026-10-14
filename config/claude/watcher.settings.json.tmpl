@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "mcp__paseo__list_workspaces",
+      "mcp__paseo__list_agents",
+      "mcp__paseo__list_room_attention",
+      "mcp__paseo__list_room_observations"
+    ],
+    "deny": [
+      "Agent",
+      "Task",
+      "Workflow",
+      "Edit",
+      "Write",
+      "NotebookEdit",
+      "Bash",
+      "Read",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "Skill"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 {{HOME}}/.codex/hooks/room-role-guard.py --role watcher",
+            "timeout": 10,
+            "statusMessage": "Checking Paseo Watcher read-only scope..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,10 +1,21 @@
 # 15 — Role proxy, guard, Lead lease và terminal state
 
+> Authority update: Supervisor is optional. Direct Human→root Lead and an independently bound root Supervisor observer use the same canonical lease and protected epoch operations as the compatible parented bootstrap. Parentage alone is not authority. `submit_work_result` resolves the active binding; direct mode persists a Human-queue receipt. See the shared [workflow protocol](../protocols/WORKFLOW_PROTOCOL.md) for repository gates, correlated reports, candidate review and owner-shell commands.
+
+
 ## Vì sao cần lớp này?
 
 Paseo native quản lý parentage, callback, permissions, archive và runtime lifecycle. Paseo không có native Supervisor/Lead/Peer authorization, provider route policy, engineering acceptance hoặc một-Lead-per-workspace lease.
 
-Ngoài ra, Paseo `0.2.5` không implement `injectIntoProviders`. Global `injectIntoAgents` chỉ inject theo capability của provider, không theo custom role.
+Paseo 0.9.1 có per-provider `paseoTools.enabled`. Mọi custom internal SLP
+provider đặt field này thành `false`, nên global injection nếu bật sau này vẫn
+không cấp native unrestricted catalog. Supervisor/Lead chỉ nhận role-aware
+proxy; Peer không có control surface.
+
+Paseo 0.9.1 áp cùng policy cho caller-scoped `/mcp/agents`. Khi endpoint đó trả
+empty catalog hoặc tool/method-not-found, proxy gọi top-level catalog và tự khôi phục chỉ caller
+workspace/parent defaults, sau đó vẫn role-filter và chạy deterministic guard.
+Regression test bắt buộc blocked tools không xuất hiện và guarded calls vẫn chạy.
 
 ## Enforcement path
 
@@ -22,10 +33,9 @@ Codex lọc `PASEO_AGENT_ID` khi launch stdio MCP subprocess. Proxy ưu tiên en
 
 Guard trước upstream:
 
-- Codex/Claude Supervisor `create_agent` mặc định chỉ chấp nhận exact `planning`; `planning_pilot` cần explicit `lead_profile=pilot`;
-- OpenCode budget Supervisor chỉ chấp nhận `planning_budget` với `lead_profile=budget` và `stack_profile=budget`; Supervisor khác không được tạo budget Lead;
-- Lead phải khai báo `route` và dùng exact provider/model từ orchestration preferences; budget Lead được guard chuyển sang exact `*_budget` route;
-- canonicalize role, route, Lead profile, task state, thinking, provider-specific unattended mode và `notifyOnFinish`;
+- Codex/Claude Supervisor `create_agent` chấp nhận exact `planning` với `lead_profile=stable` hoặc `planning_claude` với `lead_profile=claude`; Supervisor tự chọn lúc mở objective, Human có thể chỉ định;
+- canonicalize role, route, Lead profile, `room_kind`, current `work_epoch`,
+  task state, thinking, provider-specific unattended mode và `notifyOnFinish`;
 - Peer deny toàn bộ Paseo tools;
 - mutation vào agent khác phải đúng parent→child và expected role.
 
@@ -34,7 +44,17 @@ Guard sau upstream:
 - activate pending Lead lease bằng `agentId` Paseo trả về;
 - release lease khi Supervisor archive/kill Lead.
 
-Proxy còn cung cấp synthetic `handback_to_parent` riêng cho Lead. Nó không nhận target ID từ model, chỉ resolve active parent governance seat từ Paseo-owned parent metadata rồi forward final report. Supervisor và Peer không thấy tool này.
+Proxy cung cấp protected epoch lifecycle: `handback_to_parent`,
+`list_slp_decisions`, `record_slp_decision`, `reopen_work_epoch`,
+`resolve_slp_delivery`, và `archive_slp_workspace`. Reserve/deliver dùng
+correlation ID + monotonic revision; response mơ hồ không tự retry.
+
+`recover_peer_callbacks` là Lead-only bounded exception khi native callback
+không render. Nó đọc activity một lần và lưu digest-deduplicated receipt trong
+lease. `inspect_slp_ownership` hiển thị cả owned, unparented và foreign-parent
+custom Leads. `retire_legacy_lead` chỉ soft-archive exact parent-owned orphan
+bằng authority digest; managed lease holder, foreign/unparented target và
+unreadable authority fail closed.
 
 `codex-room-sync` cấp proxy MCP cho Codex Supervisor/Lead và không cấp cho Peer. `claude-room` cấp cùng proxy bằng strict role MCP config cho Claude Supervisor/Lead. Codex còn ép `mcp__paseo` đi direct-only trong code mode.
 
@@ -61,6 +81,11 @@ Registry: `lead-leases.json`.
 - `released`: old Lead đã archive/kill;
 - `failed`: create không trả agent ID;
 - pending tự hết hiệu lực sau năm phút.
+- version 2 giữ `room_kind`, `work_epoch`, `handback_epoch`, monotonic
+  `revision`, evidence digest, delivery reservation và Peer recovery receipts;
+- malformed registry/nested lease/revision fail closed;
+- `slp-decision-history.jsonl` là append-only evidence, không replay để
+  override registry.
 
 Guard còn đối chiếu agent records theo `workspaceId + role=lead + archivedAt`, không chỉ tin registry.
 
@@ -91,7 +116,8 @@ Live proxy verification phải chứng minh:
 - wrong provider cho declared Peer route bị deny;
 - registry reconcile đúng active Lead;
 - Peer runtime không có `mcp_servers.paseo`;
-- Lead thấy và gọi được `handback_to_parent`, Supervisor không thấy tool;
+- Lead thấy `submit_work_result` (alias `handback_to_parent`), `inspect_work_context`, `inspect_work_candidate`, `record_peer_report` và `recover_peer_callbacks`; Supervisor thấy
+  decision/ownership tools nhưng không thấy Lead-only handback;
 - final report tới Supervisor sau callback-driven Lead turn;
 - cleanup archive Peer rồi Lead làm lease về `released`.
 

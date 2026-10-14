@@ -5,7 +5,7 @@ role="${1:?room role is required}"
 shift
 
 case "$role" in
-  supervisor|lead|peer) ;;
+  peer) ;;
   *)
     printf 'unsupported OpenCode room role: %s\n' "$role" >&2
     exit 2

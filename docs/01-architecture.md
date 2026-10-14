@@ -2,6 +2,8 @@
 
 ## Mô hình điều khiển
 
+Supervisor là tùy chọn. Human có thể bind root Lead trực tiếp, hoặc bind một root Supervisor riêng để quan sát Lead. Sơ đồ dưới là đường bootstrap tương thích, không phải topology bắt buộc. Quyền đến từ lease/binding; parentage chỉ là ancestry của session.
+
 ```text
 Human
   │ objective, accepted decisions, product trade-offs, final authority
@@ -24,7 +26,7 @@ Paseo daemon
   ├── claude-supervisor → claude-room supervisor → Claude Opus runtime
   ├── codex-supervisor → codex-room supervisor → Codex runtime
   ├── codex-lead       → codex-room lead       → Codex runtime
-  ├── claude-lead      → claude-room lead      → Claude Sonnet runtime
+  ├── claude-lead      → claude-room lead      → Claude Opus runtime
   ├── codex-peer       → codex-room peer       → Codex runtime
   ├── opencode-peer    → opencode-paseo-peer   → OpenCode ACP
   └── gemini-ui        → antigravity-acp       → agy/Antigravity CLI
@@ -51,7 +53,7 @@ Paseo không phải model gateway. Nó launch và quản lý các external CLI/p
 - provider ID quyết định executable/profile;
 - model ID quyết định model bên trong provider;
 - `thinkingOptionId`/effort quyết định mức reasoning khi provider hỗ trợ;
-- parent-child agent relation quyết định ownership/lifecycle;
+- parent-child agent relation mô tả ancestry; lease/binding quyết định authority;
 - `workspaceId`/cwd quyết định placement, không thay đổi parentage.
 
 Một agent có thể được đặt trong workspace khác nhưng vẫn là child của agent tạo nó. Vì vậy phải kiểm tra cả `ParentAgentId` và `Cwd`.
@@ -93,3 +95,12 @@ Một agent có thể được đặt trong workspace khác nhưng vẫn là chi
 6. Finish/error/permission notification là attention event, không phải acceptance.
 7. Dissent phải đóng bằng một outcome bounded, không có debate vô hạn.
 8. Mọi identity-sensitive operation phải đọc lại agent ID và provider hiện tại trước khi viết.
+
+## Bốn lớp kiến trúc
+
+1. Paseo: identity, session, workspace, parentage, lifecycle và native events.
+2. Common enforcement: proxy/guard, một Lead mỗi workspace, correlation, epoch và candidate review.
+3. Workflow: role invariants, `.orchestration/workspace-protocol.md`, machine gates và assignment cụ thể.
+4. Provider adapter: instructions, capability và tool/report transport của Codex, Claude, OpenCode hoặc adapter tương lai.
+
+Không tạo lifecycle ledger thứ hai. Xem [workflow chung](17-provider-independent-workflow.md).

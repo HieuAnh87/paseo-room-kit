@@ -18,6 +18,7 @@
 | `~/.codex/config.toml` | baseline, MCP, trusted projects, plugins/features |
 | `~/.codex/supervisor.config.toml` | Supervisor role overlay |
 | `~/.codex/lead.config.toml` | Lead role overlay |
+| `~/.codex/watcher.config.toml` | read-only Luna Watcher role overlay |
 | `~/.codex/peer.config.toml` | Peer role overlay |
 | `~/.codex/model-instructions.md` | shared agent behavior/instructions |
 | `~/.codex/AGENTS.md` | shared Codex context |
@@ -35,6 +36,7 @@
 | `~/.local/bin/opencode-paseo-peer` | OpenCode pure ACP wrapper |
 | `~/.config/room-workflow/WORKFLOW_PROTOCOL.md` | authority, labels, lease and terminal-state contract |
 | `~/.config/room-workflow/lead-leases.json` | active/pending Lead lease registry |
+| `~/.config/room-workflow/slp-decision-history.jsonl` | append-only SLP delivery, decision, callback-recovery and retirement receipts |
 | `~/.config/room-workflow/DISSENT_PROTOCOL.md` | Lead–Peer dissent law |
 | `~/.config/room-workflow/SUPERVISOR_NOTEBOOK.md` | durable governance learning |
 | `~/.config/room-workflow/workspaces/` | workspace authority/purpose records |

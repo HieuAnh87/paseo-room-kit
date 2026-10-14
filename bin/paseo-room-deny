@@ -9,5 +9,5 @@ if [[ "${1:-}" == "hooks" && "${2:-}" == "codex" ]]; then
   exec "$real_paseo" "$@"
 fi
 
-printf 'Room authority denied: use the role-aware Paseo MCP tools; direct Paseo CLI is disabled.\\n' >&2
+printf 'Room authority denied: use the role-aware Paseo MCP tools; direct Paseo CLI is disabled.\n' >&2
 exit 77

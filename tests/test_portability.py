@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import plistlib
 import re
 import stat
+import struct
 import tempfile
 import tomllib
 import unittest
@@ -24,7 +27,7 @@ SECRET_SHAPES = (
 
 
 def repository_text_files() -> list[pathlib.Path]:
-    excluded = {".git", ".serena", "__pycache__"}
+    excluded = {".git", ".serena", "__pycache__", "node_modules"}
     files = []
     for path in ROOT.rglob("*"):
         if not path.is_file() or any(part in excluded for part in path.parts):
@@ -64,44 +67,105 @@ class PortabilityTest(unittest.TestCase):
         value = json.loads(paseo)
         self.assertTrue(value["daemon"]["mcp"]["enabled"])
         self.assertFalse(value["daemon"]["mcp"]["injectIntoAgents"])
+        internal_slp_providers = {
+            "claude-supervisor",
+            "codex-supervisor",
+            "codex-lead",
+            "claude-lead",
+            "claude-reviewer",
+            "codex-watcher",
+            "codex-peer",
+            "opencode-peer",
+                            "gemini-ui",
+        }
+        self.assertEqual(
+            {
+                name
+                for name, provider in value["agents"]["providers"].items()
+                if provider.get("paseoTools") == {"enabled": False}
+            },
+            internal_slp_providers,
+        )
         claude_supervisor = value["agents"]["providers"]["claude-supervisor"]
         self.assertEqual(claude_supervisor["extends"], "claude")
         self.assertEqual(
             claude_supervisor["models"][0]["id"],
-            "claude-opus-4-8",
+            "claude-opus-5-5",
+        )
+        self.assertEqual(
+            claude_supervisor["models"][0]["thinkingOptions"],
+            [
+                {"id": "high", "label": "High", "isDefault": True},
+                {"id": "xhigh", "label": "XHigh"},
+            ],
+        )
+        codex_supervisor = value["agents"]["providers"]["codex-supervisor"]
+        self.assertEqual(codex_supervisor["models"][0]["id"], "gpt-6.1-sol")
+        self.assertEqual(
+            codex_supervisor["models"][0]["thinkingOptions"],
+            [
+                {"id": "high", "label": "High", "isDefault": True},
+                {"id": "xhigh", "label": "XHigh"},
+            ],
+        )
+        self.assertEqual(
+            claude_supervisor["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
+            "300000",
         )
         self.assertIn("Agent", claude_supervisor["disallowedTools"])
+        self.assertIn("Workflow", claude_supervisor["disallowedTools"])
         claude_lead = value["agents"]["providers"]["claude-lead"]
         self.assertEqual(claude_lead["extends"], "claude")
         self.assertEqual(
             claude_lead["models"][0]["id"],
-            "claude-sonnet-5[1m]",
+            "claude-opus-5-5",
         )
         self.assertEqual(
             claude_lead["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"],
             "300000",
         )
         self.assertEqual(
-            claude_lead["models"][0]["thinkingOptions"][0]["id"],
-            "high",
+            next(item["id"] for item in claude_lead["models"][0]["thinkingOptions"] if item.get("isDefault")),
+            "xhigh",
         )
+        for provider in ("codex-lead", "claude-lead"):
+            self.assertEqual(value["agents"]["providers"][provider]["models"][0]["thinkingOptions"], [
+                {"id": "high", "label": "High"},
+                {"id": "xhigh", "label": "XHigh", "isDefault": True},
+                {"id": "max", "label": "Max"},
+            ])
         self.assertIn("Agent", claude_lead["disallowedTools"])
+        self.assertIn("Workflow", claude_lead["disallowedTools"])
 
-        opencode_supervisor = value["agents"]["providers"]["opencode-supervisor"]
-        self.assertEqual(opencode_supervisor["extends"], "acp")
-        self.assertEqual(
-            opencode_supervisor["models"][0]["id"],
-            "aibox/deepseek-v4-flash",
-        )
-        opencode_lead = value["agents"]["providers"]["opencode-lead"]
-        self.assertEqual(opencode_lead["extends"], "acp")
-        self.assertEqual(opencode_lead["models"][0]["id"], "aibox/glm-5.2")
-        self.assertEqual(
-            opencode_lead["models"][0]["thinkingOptions"][0]["id"],
-            "max",
-        )
+        for role in ("supervisor", "lead", "peer", "watcher"):
+            settings = json.loads(
+                (ROOT / f"config/claude/{role}.settings.json.tmpl")
+                .read_text()
+                .replace("{{HOME}}", str(home))
+            )
+            self.assertIn("Workflow", settings["permissions"]["deny"])
 
-        for role in ("supervisor", "lead", "peer"):
+        reviewer = value["agents"]["providers"]["claude-reviewer"]
+        self.assertEqual(reviewer["models"][0]["id"], "claude-opus-5-5")
+        self.assertEqual(reviewer["models"][0]["thinkingOptions"][0]["id"], "high")
+        watcher = value["agents"]["providers"]["codex-watcher"]
+        self.assertEqual(watcher["models"][0]["id"], "gpt-6-luna")
+        self.assertEqual(watcher["models"][0]["thinkingOptions"][0]["id"], "medium")
+        self.assertEqual(watcher["params"]["sandbox_mode"], "read-only")
+        self.assertEqual(watcher["params"]["approval_policy"], "never")
+        peer = value["agents"]["providers"]["codex-peer"]
+        self.assertEqual([item["id"] for item in peer["models"]], ["gpt-6-luna", "gpt-6.1-sol"])
+
+        self.assertEqual(peer["models"][0]["thinkingOptions"], [
+            {"id": "high", "label": "High", "isDefault": True},
+            {"id": "xhigh", "label": "XHigh"},
+            {"id": "max", "label": "Max"},
+        ])
+
+        self.assertNotIn("opencode-supervisor", value["agents"]["providers"])
+        self.assertNotIn("opencode-lead", value["agents"]["providers"])
+
+        for role in ("supervisor", "lead", "peer", "watcher"):
             text = (
                 ROOT / f"config/codex/{role}.config.toml.tmpl"
             ).read_text().replace("{{HOME}}", str(home))
@@ -117,27 +181,64 @@ class PortabilityTest(unittest.TestCase):
                 if name.endswith(".json"):
                     json.loads(text)
 
-        for role in ("supervisor", "lead"):
-            text = (
-                ROOT / f"config/opencode/paseo-{role}.json.tmpl"
-            ).read_text().replace("{{HOME}}", str(home))
-            self.assertNotIn("{{", text)
-            opencode = json.loads(text)
-            self.assertEqual(opencode["default_agent"], "build")
-            self.assertEqual(opencode["permission"]["task"], "deny")
-            self.assertEqual(
-                opencode["mcp"]["paseo"]["command"][-1],
-                role,
-            )
 
-            instructions = (
-                ROOT / f"config/opencode/paseo-{role}.instructions.md.tmpl"
-            ).read_text().replace("{{HOME}}", str(home))
-            self.assertNotIn("{{", instructions)
+    def test_installed_paseo_provider_policy_schema_when_available(self) -> None:
+        app = pathlib.Path(
+            os.environ.get("PASEO_APP_PATH", "/Applications/Paseo.app")
+        )
+        plist_path = app / "Contents/Info.plist"
+        asar_path = app / "Contents/Resources/app.asar"
+        if not plist_path.is_file() or not asar_path.is_file():
+            self.skipTest("installed Paseo application bundle is unavailable")
+        with plist_path.open("rb") as stream:
+            version = plistlib.load(stream)["CFBundleShortVersionString"]
+        expected = json.loads((ROOT / "versions.lock.json").read_text())["paseo"]
+        self.assertEqual(version, expected)
+
+        data = asar_path.read_bytes()
+        header_length = struct.unpack("<I", data[12:16])[0]
+        header = json.loads(data[16 : 16 + header_length])
+        data_offset = 8 + struct.unpack("<I", data[4:8])[0]
+
+        def asar_text(relative: str) -> str:
+            node = header
+            for component in relative.split("/"):
+                node = node["files"][component]
+            offset = data_offset + int(node["offset"])
+            return data[offset : offset + node["size"]].decode()
+
+        schema = asar_text(
+            "node_modules/@getpaseo/protocol/dist/provider-config.js"
+        )
+        policy = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/"
+            "paseo-tool-policy.js"
+        )
+        manager = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/"
+            "agent-manager.js"
+        )
+        bootstrap = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/bootstrap.js"
+        )
+        paseo_tools = asar_text(
+            "node_modules/@getpaseo/server/dist/server/server/agent/tools/"
+            "paseo-tools.js"
+        )
+        self.assertIn("paseoTools: ProviderPaseoToolsPolicySchema.optional()", schema)
+        self.assertIn("enabled: z.boolean().optional()", schema)
+        self.assertIn("policy?.enabled !== false", policy)
+        self.assertGreaterEqual(manager.count("isPaseoToolPolicyEnabled"), 3)
+        self.assertGreaterEqual(manager.count("withRuntimePaseoMcpServer"), 2)
+        self.assertIn("agentManager.getPaseoToolPolicy(callerAgentId)", bootstrap)
+        self.assertIn(
+            "if (!isPaseoToolEnabled(options.paseoToolPolicy, name))",
+            paseo_tools,
+        )
 
     def test_runtime_state_templates_are_empty(self) -> None:
         leases = json.loads((ROOT / "templates/lead-leases.empty.json").read_text())
-        self.assertEqual(leases, {"version": 1, "leases": {}})
+        self.assertEqual(leases, {"version": 2, "leases": {}})
 
     def test_expected_executables_are_marked_executable(self) -> None:
         paths = [

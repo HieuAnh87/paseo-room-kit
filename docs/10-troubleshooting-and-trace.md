@@ -36,7 +36,7 @@ Root cause:
 Fix hiện tại:
 
 - tạo `orchestration-preferences.json`;
-- map `planning` → `codex-lead/gpt-5.6-sol`;
+- map `planning` → `codex-lead/gpt-6.1-sol` and `planning_claude` → `claude-lead/claude-opus-5-5`;
 - map Peer routes → custom provider;
 - thêm explicit provider verification sau create;
 - stock chain cũ giữ history, không tiếp tục chain misrouted.
@@ -116,7 +116,7 @@ Xem [06-mcp-and-visibility.md](06-mcp-and-visibility.md). Đừng nhầm:
 
 ## Peer xong nhưng Supervisor không nhận final Lead result
 
-Đây không nhất thiết là mất event. `notifyOnFinish` của Paseo `0.2.5` gắn với turn được create/prompt:
+Đây không nhất thiết là mất event. `notifyOnFinish` của Paseo `0.8.0` gắn với turn được create/prompt:
 
 ```text
 Supervisor prompts Lead
@@ -130,7 +130,7 @@ Lead phải gọi `handback_to_parent` sau validation. Nếu tool báo không t�
 
 1. xác nhận Lead có label `paseo.parent-agent-id`;
 2. xác nhận parent chưa archive;
-3. parent mới nên có `role=supervisor`; Supervisor legacy được nhận bằng provider canonical `codex-supervisor`, `claude-supervisor` hoặc `opencode-supervisor`;
+3. parent mới nên có `role=supervisor`; Supervisor legacy được nhận bằng provider canonical `codex-supervisor`, `claude-supervisor`;
 4. reload riêng Lead để stdio MCP process nạp proxy mới; không cần restart toàn daemon;
 5. chỉ retry khi lần trước được xác nhận chưa deliver.
 

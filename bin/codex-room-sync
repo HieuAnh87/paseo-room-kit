@@ -8,11 +8,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 
 ROLE_FILES = {
     "lead": "lead.config.toml",
     "peer": "peer.config.toml",
     "supervisor": "supervisor.config.toml",
+    "watcher": "watcher.config.toml",
 }
 
 OVERRIDE_KEYS = {
@@ -26,6 +28,7 @@ OVERRIDE_KEYS = {
     "sandbox_mode",
     "approval_policy",
     "approvals_reviewer",
+    "web_search",
 }
 
 
@@ -80,7 +83,9 @@ def link(runtime: pathlib.Path, name: str, target: pathlib.Path) -> None:
     path.symlink_to(target)
 
 
-def write_no_native_agents_model_catalog(runtime: pathlib.Path) -> pathlib.Path:
+def write_no_native_agents_model_catalog(
+    runtime: pathlib.Path, requested_model: str, extra_models: tuple[str, ...] = ()
+) -> pathlib.Path:
     codex_bin = os.environ.get("CODEX_BIN") or shutil.which("codex")
     if not codex_bin:
         raise SystemExit("codex binary not found while building the room model catalog")
@@ -92,12 +97,29 @@ def write_no_native_agents_model_catalog(runtime: pathlib.Path) -> pathlib.Path:
     )
     catalog = json.loads(result.stdout)
     models = catalog.get("models")
+    required = {requested_model, *extra_models}
+    if isinstance(models, list) and not required.issubset({
+        model.get("slug") for model in models if isinstance(model, dict)
+    }):
+        # New account models may arrive before the CLI's bundled catalog.
+        result = subprocess.run(
+            [codex_bin, "debug", "models"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        catalog = json.loads(result.stdout)
+        models = catalog.get("models")
     if not isinstance(models, list) or not models:
-        raise SystemExit("Codex bundled model catalog contains no models")
+        raise SystemExit("Codex model catalog contains no models")
     for model in models:
         if not isinstance(model, dict):
-            raise SystemExit("Codex bundled model catalog contains an invalid model")
+            raise SystemExit("Codex model catalog contains an invalid model")
         model["multi_agent_version"] = None
+    missing = required - {model.get("slug") for model in models}
+    if missing:
+        raise SystemExit(f"Requested room model is absent from Codex catalog: {', '.join(sorted(missing))}")
 
     target = runtime / "model-catalog.no-native-agents.json"
     fd, temporary = tempfile.mkstemp(prefix="model-catalog.", suffix=".json", dir=runtime)
@@ -131,7 +153,7 @@ def write_role_hooks(
             raise SystemExit(f"Codex hooks event {event} must be an array")
         groups.append(
             {
-                "matcher": "^Bash$|^exec$|^mcp__paseo__.*$|^paseo_.*$",
+                "matcher": ".*" if role == "watcher" else "^Bash$|^exec$|^mcp__paseo__.*$|^paseo_.*$",
                 "hooks": [
                     {
                         "type": "command",
@@ -234,7 +256,10 @@ def main() -> None:
     runtime.mkdir(parents=True, exist_ok=True)
     offset = top_level_table_offset(base)
     overrides = scalar_overrides(overlay)
-    model_catalog = write_no_native_agents_model_catalog(runtime)
+    requested_model = tomllib.loads(overlay)["model"]
+    model_catalog = write_no_native_agents_model_catalog(
+        runtime, requested_model, ("gpt-6.1-sol",) if role == "peer" else ()
+    )
     overrides["model_catalog_json"] = json.dumps(str(model_catalog))
     head = apply_scalar_overrides(base[:offset], overrides)
     tail = base[offset:]
@@ -243,8 +268,14 @@ def main() -> None:
         tail = tail.replace("use_memories = false", "use_memories = true")
     instructions = developer_block(overlay)
     merged = head + (instructions + "\n" if instructions else "") + tail.lstrip()
-    merged = enforce_direct_paseo_tools(merged)
-    if role in {"supervisor", "lead"}:
+    if role == "watcher":
+        # The watcher inherits no general-purpose connector or code-mode tools.
+        merged = re.sub(r"(?ms)^\[mcp_servers\.[^\n]+\]\n.*?(?=^\[|\Z)", "", merged)
+        merged = re.sub(r"(?ms)^\[features\.code_mode\]\n.*?(?=^\[|\Z)", "", merged)
+        merged += "\n[features.code_mode]\nenabled = false\n"
+    else:
+        merged = enforce_direct_paseo_tools(merged)
+    if role in {"supervisor", "lead", "watcher"}:
         merged = configure_role_paseo_mcp(merged, role)
     else:
         merged = remove_role_paseo_mcp(merged)

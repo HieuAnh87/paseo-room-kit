@@ -48,21 +48,29 @@ EXPECTED_PAYLOADS = {
     "bin/opencode-paseo-room",
     "bin/paseo-room-deny",
     "bin/paseo-room-mcp",
+    "bin/paseo-room-workflow",
+    "bin/room_workflow.py",
+    "bin/room_attention.py",
+    "bin/room_land.py",
+    "bin/room_tasks.py",
     "config/claude/lead.instructions.md.tmpl",
     "config/claude/lead.mcp.json.tmpl",
     "config/claude/lead.settings.json.tmpl",
+    "config/claude/peer.instructions.md.tmpl",
+    "config/claude/peer.mcp.json.tmpl",
+    "config/claude/peer.settings.json.tmpl",
     "config/claude/supervisor.instructions.md.tmpl",
     "config/claude/supervisor.mcp.json.tmpl",
     "config/claude/supervisor.settings.json.tmpl",
+    "config/claude/watcher.instructions.md.tmpl",
+    "config/claude/watcher.mcp.json.tmpl",
+    "config/claude/watcher.settings.json.tmpl",
     "config/codex/lead.config.toml.tmpl",
     "config/codex/model-instructions.md",
     "config/codex/peer.config.toml.tmpl",
     "config/codex/supervisor.config.toml.tmpl",
-    "config/opencode/paseo-lead.instructions.md.tmpl",
-    "config/opencode/paseo-lead.json.tmpl",
+    "config/codex/watcher.config.toml.tmpl",
     "config/opencode/paseo-peer.json",
-    "config/opencode/paseo-supervisor.instructions.md.tmpl",
-    "config/opencode/paseo-supervisor.json.tmpl",
     "config/paseo/config.json.tmpl",
     "config/paseo/orchestration-preferences.json",
     "docs/architecture.md",
@@ -76,13 +84,32 @@ EXPECTED_PAYLOADS = {
     "scripts/export_public_kit.py",
     "scripts/install-antigravity-acp.sh",
     "scripts/install.sh",
+    "scripts/manage_zshrc.py",
     "scripts/render_template.py",
     "templates/SUPERVISOR_NOTEBOOK.md",
     "templates/codex-config.minimal.toml",
     "templates/lead-leases.empty.json",
     "tests/test_portability.py",
     "tests/test_proxy_handback.py",
+    "tests/test_workflow.py",
+    "tests/test_attention.py",
+    "tests/test_land.py",
+    "tests/test_tasks.py",
+    "tests/test_codex_model_catalog.py",
+    "tests/test_native_binding.py",
+    "tests/test_doctor.py",
+    "tests/test_install.py",
     "tests/test_public_export.py",
+    'tests/test_room_modes.py',
+    'tests/test_room_callbacks.py',
+    'callback-plugin/package.json',
+    'callback-plugin/package-lock.json',
+    'callback-plugin/paseo-plugin.json',
+    'callback-plugin/tsconfig.json',
+    'callback-plugin/OVERVIEW.md',
+    'callback-plugin/index.server.ts',
+    'callback-plugin/server/relay.ts',
+    'callback-plugin/test/relay.test.ts',
 }
 
 EXCLUDED_SOURCE_PATHS = {
@@ -100,6 +127,23 @@ EXCLUDED_SOURCE_PATHS = {
 
 
 class PublicExportTest(unittest.TestCase):
+    def test_paseo_pin_matches_private_and_public_locks(self) -> None:
+        root_lock = json.loads(
+            (ROOT / "versions.lock.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(root_lock["paseo"], "0.11.2")
+
+        public_lock_path = ROOT / "public-export/versions.lock.json"
+        if not public_lock_path.is_file():
+            self.assertNotIn("captured_at", root_lock)
+            return
+
+        public_lock = json.loads(public_lock_path.read_text(encoding="utf-8"))
+        self.assertEqual(public_lock["paseo"], root_lock["paseo"])
+        self.assertNotIn("captured_at", public_lock)
+        for key, value in public_lock.items():
+            self.assertEqual(root_lock[key], value, key)
+
     def test_allowlist_matches_exact_review_baseline(self) -> None:
         allowlist_path = ROOT / "public-export/allowlist.json"
         if not allowlist_path.is_file():
@@ -201,14 +245,16 @@ class PublicExportTest(unittest.TestCase):
             def run(*command: str) -> subprocess.CompletedProcess[str]:
                 environment = os.environ.copy()
                 environment["PYTHONDONTWRITEBYTECODE"] = "1"
-                return subprocess.run(
+                environment["PASEO_APP_PATH"] = str(parent / "no-paseo-app")
+                result = subprocess.run(
                     command,
                     cwd=artifact,
-                    check=True,
                     capture_output=True,
                     env=environment,
                     text=True,
                 )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result
 
             run("./scripts/doctor.sh", "--repo")
             run(sys.executable, "tests/test_public_export.py")
@@ -457,6 +503,14 @@ upstream: https://github.com/example/upstream
                 ),
             )
             return SCANNER.scan_public_artifact(artifact)
+
+    def test_scanner_allows_runtime_generation_and_fixture_attributes(self) -> None:
+        content = "run_" + "id = uuid.uuid4().hex\n"
+        content += "registry = {fixtures.WORKSPACE_" + "ID: lease}\n"
+        self.assertEqual(self._scan_fixture(content, "fixture.py"), [])
+        content += 'run_' + 'id = "private-runtime-123456789"\n'
+        findings = self._scan_fixture(content, "fixture.py")
+        self.assertTrue(any(finding.rule == "runtime-id" for finding in findings))
 
 
 if __name__ == "__main__":

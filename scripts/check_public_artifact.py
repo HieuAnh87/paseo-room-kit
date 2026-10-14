@@ -216,6 +216,20 @@ def _runtime_placeholder(value: str) -> bool:
     cleaned = value.strip()
     if _placeholder(cleaned):
         return True
+    if cleaned == "uuid.uuid4().hex":
+        return True
+    if "{" in cleaned and "}" in cleaned:
+        return True
+    if re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?(?:\([^\n)]*\))?",
+        cleaned,
+    ):
+        return True
+    if re.fullmatch(
+        r"[A-Za-z_][A-Za-z0-9_]*",
+        cleaned.rstrip(")}]"),
+    ):
+        return True
     normalized = cleaned.strip("\"'").lower()
     return cleaned.startswith(
         (
@@ -236,6 +250,7 @@ def _runtime_placeholder(value: str) -> bool:
         "workspace-new",
         "workspace-one",
         "workspace-pilot",
+        "workspace-project",
     } or cleaned in {
         "None",
         "=",

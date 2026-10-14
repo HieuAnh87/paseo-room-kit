@@ -39,6 +39,9 @@
         "enabled": true
       },
       "claude-supervisor": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "claude",
         "label": "Claude Opus Supervisor",
         "description": "Human-facing governance Supervisor using Claude Opus",
@@ -47,36 +50,38 @@
           "supervisor"
         ],
         "env": {
+          "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000",
           "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
         },
         "disallowedTools": [
           "Agent",
-          "Task"
+          "Task",
+          "Workflow"
         ],
         "models": [
           {
-            "id": "claude-opus-4-8",
-            "label": "Opus 4.8",
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
             "isDefault": true,
+            "contextWindowMaxTokens": 1000000,
             "thinkingOptions": [
               {
-                "id": "medium",
-                "label": "Medium",
+                "id": "high",
+                "label": "High",
                 "isDefault": true
               },
               {
-                "id": "high",
-                "label": "High"
-              },
-              {
-                "id": "max",
-                "label": "Max"
+                "id": "xhigh",
+                "label": "XHigh"
               }
             ]
           }
         ]
       },
       "codex-supervisor": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "codex",
         "label": "Codex Supervisor",
         "description": "Project-owner assistant for cross-workspace supervision and operations",
@@ -86,51 +91,27 @@
         ],
         "models": [
           {
-            "id": "gpt-5.6-sol",
-            "label": "Sol",
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
             "isDefault": true,
             "thinkingOptions": [
               {
-                "id": "low",
-                "label": "Low"
-              },
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              },
-              {
                 "id": "high",
-                "label": "High"
+                "label": "High",
+                "isDefault": true
               },
               {
                 "id": "xhigh",
                 "label": "XHigh"
-              },
-              {
-                "id": "max",
-                "label": "Max"
-              },
-              {
-                "id": "ultra",
-                "label": "Ultra"
-              }
-            ]
-          },
-          {
-            "id": "gpt-5.6-luna",
-            "label": "Luna",
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
               }
             ]
           }
         ]
       },
       "codex-lead": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "codex",
         "label": "Codex Lead",
         "description": "Lead profile for owner-led engineering rooms and peer consultation",
@@ -140,54 +121,34 @@
         ],
         "models": [
           {
-            "id": "gpt-5.6-sol",
-            "label": "Sol",
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
             "isDefault": true,
             "thinkingOptions": [
-              {
-                "id": "low",
-                "label": "Low"
-              },
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              },
               {
                 "id": "high",
                 "label": "High"
               },
               {
                 "id": "xhigh",
-                "label": "XHigh"
+                "label": "XHigh",
+                "isDefault": true
               },
               {
                 "id": "max",
                 "label": "Max"
-              },
-              {
-                "id": "ultra",
-                "label": "Ultra"
-              }
-            ]
-          },
-          {
-            "id": "gpt-5.6-luna",
-            "label": "Luna",
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
               }
             ]
           }
         ]
       },
       "claude-lead": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "claude",
-        "label": "Claude Sonnet Lead · Pilot",
-        "description": "Pilot engineering Lead using Sonnet 5 with bounded active context",
+        "label": "Claude Opus Lead",
+        "description": "Engineering Lead using Opus 5.5 with bounded active context",
         "command": [
           "{{HOME}}/.local/bin/claude-room",
           "lead"
@@ -198,14 +159,57 @@
         },
         "disallowedTools": [
           "Agent",
-          "Task"
+          "Task",
+          "Workflow"
         ],
         "models": [
           {
-            "id": "claude-sonnet-5[1m]",
-            "label": "Sonnet 5 1M · Pilot",
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
             "isDefault": true,
             "contextWindowMaxTokens": 1000000,
+            "thinkingOptions": [
+              {
+                "id": "high",
+                "label": "High"
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh",
+                "isDefault": true
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              }
+            ]
+          }
+        ]
+      },
+      "claude-reviewer": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "claude",
+        "label": "Claude Reviewer",
+        "description": "Read-only independent candidate review using Opus 5.5",
+        "command": [
+          "{{HOME}}/.local/bin/claude-room",
+          "peer"
+        ],
+        "env": {
+          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
+        },
+        "disallowedTools": [
+          "Agent",
+          "Task",
+          "Workflow"
+        ],
+        "models": [
+          {
+            "id": "claude-opus-5-5",
+            "label": "Opus 5.5",
+            "isDefault": true,
             "thinkingOptions": [
               {
                 "id": "high",
@@ -217,6 +221,9 @@
         ]
       },
       "codex-peer": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "codex",
         "label": "Codex Peer",
         "description": "Bounded engineering peer with independent task-local judgment",
@@ -226,22 +233,14 @@
         ],
         "models": [
           {
-            "id": "gpt-5.6-sol",
-            "label": "Sol",
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
             "isDefault": true,
             "thinkingOptions": [
               {
-                "id": "low",
-                "label": "Low"
-              },
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              },
-              {
                 "id": "high",
-                "label": "High"
+                "label": "High",
+                "isDefault": true
               },
               {
                 "id": "xhigh",
@@ -250,29 +249,17 @@
               {
                 "id": "max",
                 "label": "Max"
-              },
-              {
-                "id": "ultra",
-                "label": "Ultra"
               }
             ]
           },
           {
-            "id": "gpt-5.6-luna",
-            "label": "Luna",
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
             "thinkingOptions": [
               {
-                "id": "low",
-                "label": "Low"
-              },
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              },
-              {
                 "id": "high",
-                "label": "High"
+                "label": "High",
+                "isDefault": true
               },
               {
                 "id": "xhigh",
@@ -287,6 +274,9 @@
         ]
       },
       "opencode-peer": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "acp",
         "label": "OpenCode Peer",
         "description": "OpenCode worker without provider-side orchestration",
@@ -296,7 +286,7 @@
         "models": [
           {
             "id": "aibox/deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash · AI Box",
+            "label": "DeepSeek V4 Flash \u00b7 AI Box",
             "isDefault": true,
             "thinkingOptions": [
               {
@@ -308,53 +298,7 @@
           },
           {
             "id": "aibox/glm-5.2",
-            "label": "GLM 5.2 · AI Box",
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
-              }
-            ]
-          }
-        ]
-      },
-      "opencode-supervisor": {
-        "extends": "acp",
-        "label": "AI Box Supervisor · Budget",
-        "description": "Human-facing budget Supervisor using DeepSeek V4 Flash",
-        "command": [
-          "{{HOME}}/.local/bin/opencode-paseo-room",
-          "supervisor"
-        ],
-        "models": [
-          {
-            "id": "aibox/deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash · AI Box",
-            "isDefault": true,
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
-              }
-            ]
-          }
-        ]
-      },
-      "opencode-lead": {
-        "extends": "acp",
-        "label": "AI Box GLM Lead · Budget",
-        "description": "Budget engineering Lead using GLM 5.2",
-        "command": [
-          "{{HOME}}/.local/bin/opencode-paseo-room",
-          "lead"
-        ],
-        "models": [
-          {
-            "id": "aibox/glm-5.2",
-            "label": "GLM 5.2 · AI Box",
-            "isDefault": true,
+            "label": "GLM 5.2 \u00b7 AI Box",
             "thinkingOptions": [
               {
                 "id": "max",
@@ -366,8 +310,11 @@
         ]
       },
       "gemini-ui": {
+        "paseoTools": {
+          "enabled": false
+        },
         "extends": "acp",
-        "label": "Gemini UI · Antigravity ACP",
+        "label": "Gemini UI \u00b7 Antigravity ACP",
         "description": "Gemini UI/design peer through the Antigravity ACP bridge",
         "params": {
           "supportsMcpServers": false
@@ -378,38 +325,69 @@
         "models": [
           {
             "id": "gemini-3.6-flash-medium",
-            "label": "Gemini 3.6 Flash · Medium",
+            "label": "Gemini 3.6 Flash \u00b7 Medium",
             "isDefault": true
           },
           {
             "id": "gemini-3.6-flash-low",
-            "label": "Gemini 3.6 Flash · Low"
+            "label": "Gemini 3.6 Flash \u00b7 Low"
           },
           {
             "id": "gemini-3.6-flash-high",
-            "label": "Gemini 3.6 Flash · High"
+            "label": "Gemini 3.6 Flash \u00b7 High"
           },
           {
             "id": "gemini-3.5-flash-medium",
-            "label": "Gemini 3.5 Flash · Medium"
+            "label": "Gemini 3.5 Flash \u00b7 Medium"
           },
           {
             "id": "gemini-3.5-flash-low",
-            "label": "Gemini 3.5 Flash · Low"
+            "label": "Gemini 3.5 Flash \u00b7 Low"
           },
           {
             "id": "gemini-3.5-flash-high",
-            "label": "Gemini 3.5 Flash · High"
+            "label": "Gemini 3.5 Flash \u00b7 High"
           },
           {
             "id": "gemini-3.1-pro-low",
-            "label": "Gemini 3.1 Pro · Low"
+            "label": "Gemini 3.1 Pro \u00b7 Low"
           },
           {
             "id": "gemini-3.1-pro-high",
-            "label": "Gemini 3.1 Pro · High"
+            "label": "Gemini 3.1 Pro \u00b7 High"
           }
         ]
+      },
+      "codex-watcher": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "codex",
+        "label": "Codex Room Watcher",
+        "description": "Independent read-only room attention scan using GPT-6 Luna",
+        "command": [
+          "{{HOME}}/.local/bin/codex-room",
+          "watcher"
+        ],
+        "models": [
+          {
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          }
+        ],
+        "params": {
+          "sandbox_mode": "read-only",
+          "approval_policy": "never",
+          "web_search": "disabled"
+        }
       }
     }
   },

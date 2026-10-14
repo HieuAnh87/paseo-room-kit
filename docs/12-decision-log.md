@@ -35,7 +35,7 @@ Một Codex baseline được materialize thành ba `CODEX_HOME` khác nhau. Nat
 
 ## D7 — MCP
 
-Paseo `0.2.5` chỉ có global `injectIntoAgents`; `injectIntoProviders` không có implementation. Global injection được tắt. Supervisor/Lead nhận role-aware `paseo-room-mcp`; Peer không nhận control MCP. OpenCode permissions, CLI wrapper và ACP capability flag bổ sung boundary. Baseline Codex MCP vẫn được runtime role kế thừa.
+Tại thời điểm D7, Paseo `0.2.5` chỉ có global `injectIntoAgents`; `injectIntoProviders` không có implementation. Global injection được tắt. Supervisor/Lead nhận role-aware `paseo-room-mcp`; Peer không nhận control MCP. OpenCode permissions, CLI wrapper và ACP capability flag bổ sung boundary. Baseline Codex MCP vẫn được runtime role kế thừa.
 
 ## D8 — Rút gọn OpenCode Peer
 
@@ -114,3 +114,125 @@ non-UI Peer. UI giữ `gemini-ui` qua agy. Guard bind bằng
 `lead_profile=budget` + `stack_profile=budget`: chỉ budget Supervisor tạo được
 budget Lead, và Lead đó luôn resolve `*_budget`. Stable Sol và Sonnet pilot
 không đổi.
+
+## D19 — Managed SLP dùng epoch, revision và evidence digest
+
+Native status và callback chỉ là transport/runtime fact. Managed room được đánh
+dấu `room_kind=managed_slp`; `lead-leases.json` version 2 là authority cho
+`work_epoch`, monotonic `revision`, trạng thái giao handback và Human decision.
+
+- handback, reopen và archive đều reserve trước khi gọi transport;
+- response mơ hồ không tự retry và phải được Human resolve;
+- acceptance/abandonment bind vào SHA-256 digest của evidence đúng epoch;
+- generic prompt/archive và direct lifecycle-label mutation bị deny;
+- history JSONL là audit evidence, không replay để override lease registry.
+
+## D20 — Recovery phải dựa vào persisted authority, không dựa vào plugin event hoặc idle
+
+Một Peer đã có terminal handback trong Paseo activity nhưng callback không render
+trong Lead turn. Chọn `recover_peer_callbacks` làm bounded exception path:
+kiểm tra parent/workspace/current epoch, đọc durable status/activity một lần, lưu
+message + digest receipt trong lease, và những lần gọi lại dùng receipt thay vì
+đọc activity tiếp. Paseo 0.8 curated activity không expose stable turn ID, nên
+receipt bind `peerId + workEpoch + updateCount + terminal message`; missing hoặc
+invalid update count fail closed. Native callback vẫn là primary path; recovery
+không phải poll.
+
+Episode legacy Lead cho thấy workspace archive và agent `archivedAt` là hai fact
+khác nhau. Chọn `inspect_slp_ownership` để phân loại theo workspace registry,
+Paseo-owned parentage và lease; unparented/foreign records được hiển thị nhưng
+không tạo mutation authority. `retire_legacy_lead` chỉ soft-archive exact
+parent-owned custom Lead không giữ managed lease, với authority digest và explicit
+Human-authorized checkpoint/replacement. Native `idle` không cấp authority.
+
+Paseo 0.8 hỗ trợ per-provider `paseoTools.enabled`. Mọi custom internal SLP
+provider đặt `enabled=false`, nên global injection nếu bật về sau vẫn không cấp
+native unrestricted catalog. Vì cùng policy làm caller-scoped HTTP catalog rỗng,
+proxy thử top-level daemon catalog sau empty/method-not-found response rồi khôi phục chỉ
+workspace/parent defaults từ caller record trước role filter + guard; regression
+test giữ đây là control surface duy nhất.
+Plugin không được đưa vào lifecycle truth; UI tương lai chỉ có thể là thin client
+trên protected operations.
+
+## D21 — Supervisor tự chọn Codex hoặc Claude Lead cho từng workstream
+
+D17 là cấu hình pilot cũ. Standard Supervisor nay được chọn giữa
+`planning` → `codex-lead/gpt-6-sol` XHigh và
+`planning_claude` → `claude-lead/claude-opus-5-5` High khi mở objective mới.
+Không cần Human gọi tên Claude trước; một chỉ định rõ từ Human được ưu tiên.
+Khi không có lợi thế rõ cho một route, chọn Codex. Guard kiểm tra exact route,
+profile label, mode, thinking và lease; model không đổi giữa phiên.
+
+Một Lead sở hữu một bounded objective/workstream, có thể giao nhiều Peer và
+xử lý follow-up của chính objective đó qua work epoch. Objective độc lập cần
+workspace/worktree riêng; nếu write scope hoặc contracts chồng nhau, Supervisor
+xếp tuần tự. Guard bảo vệ một Lead mỗi workspace; kiểm tra chồng phạm vi giữa
+các workspace vẫn là quy tắc workflow, chưa được enforcement bằng máy.
+
+## D22 — Claude Opus Lead dùng XHigh
+
+Opus 5.5 hỗ trợ XHigh trong Claude Code/Paseo. Cấu hình High ở D21 thấp hơn
+mức Human mong muốn; Lead Claude nay pin XHigh. Guard, catalog, Supervisor
+instructions và kiểm tra route dùng cùng mức này.
+
+## D23 — Peer, Reviewer và Watcher chuẩn
+
+Standard Peer cho `impl`, `impl_deep`, `search` dùng GPT-6 Luna Medium. Review
+`audit` dùng Claude Opus 5.5 High trong Plan Mode, chỉ nhận disposition
+`reviewer` và scope read-only. Budget stack giữ DeepSeek Max theo các route
+`*_budget`.
+
+Watcher độc lập dùng Claude Sonnet 5 Medium. User chọn lịch 60 phút một lần
+để quét tất cả managed rooms và báo tín hiệu quan sát được. Role proxy chỉ mở
+read tools và attention; Watcher không có quyền governance hay engineering.
+
+## D24 — Claude Supervisor song song dùng Opus 5.5 XHigh
+
+Nâng custom `claude-supervisor` từ Opus 4.8 Medium/High/Max cũ lên Opus 5.5
+XHigh với active auto-compact window 300K. Giữ cùng governance boundary và
+quyền tự chọn `planning` hoặc `planning_claude` như Codex Supervisor. Chỉ
+mở một Lead cho mỗi bounded objective/workspace và không nhận engineering
+ownership.
+
+## D25 — Supervisor tự mở Lead cho objective kỹ thuật rõ ràng
+
+Một phiên Claude Supervisor đã trả lời nhiều lượt nghiên cứu/thiết kế thông báo
+trực tiếp và không gọi `create_agent`, dù role MCP có tool này. Câu "chỉ
+bootstrap khi Human yêu cầu supervised room" mâu thuẫn với quyết định tự
+chọn Lead. Bỏ điều kiện từ khoá: khi objective kỹ thuật đã rõ, kể cả thiết kế
+kiến trúc hay research, Supervisor kiểm tra owner rồi mở đúng một Lead trước
+khi tự đi sâu vào lời giải. Định hướng chung hoặc một câu hỏi sự kiện lẻ vẫn
+có thể trả lời ngay mà không tạo room.
+
+Claude Supervisor đã gọi native `Workflow` để fanout năm mũi research ngoài
+Paseo, dù provider chặn `Agent`/`Task`. Chặn thêm `Workflow` tại provider
+catalog và settings của mọi Claude role; delegation trong managed room phải
+đi qua Paseo role proxy để giữ parentage và guard.
+
+## D26 — Supervisor có thêm High
+
+Cho phép chọn High hoặc XHigh trên cả `codex-supervisor/gpt-6-sol` và
+`claude-supervisor/claude-opus-5-5`; XHigh vẫn là mặc định. Đây là lựa chọn
+thinking của chính Supervisor, không đổi mức XHigh đã pin cho Lead.
+
+## D27 — Codex Supervisor và Lead dùng GPT-6.1 Sol
+
+Ngày 30/09/2026, Human yêu cầu nâng Sol lên `gpt-6.1-sol`. Model mặc định
+của Codex Supervisor, Codex Lead và route `planning` được cập nhật cùng nhau.
+Supervisor tiếp tục cho chọn High hoặc XHigh, mặc định XHigh; Lead dùng XHigh.
+Khi model mới chưa có trong catalog bundled, `codex-room-sync` lấy catalog
+Codex đã refresh rồi tắt native multi-agent cho toàn bộ model như trước.
+
+## D26 — Retire budget topology and move Watcher to Luna (2026-10-13)
+
+Human retired the DeepSeek Supervisor → GLM Lead → DeepSeek Peer budget topology.
+Remove its launch providers and routing keys; old budget seats may not create new work.
+Standard research keeps its separate OpenCode Peer route. Room Watcher now uses
+`codex-watcher/gpt-6-luna` Medium with a read-only runtime and the existing daily
+01:00 Asia/Ho_Chi_Minh schedule. Independent candidate review remains Opus 5.5 High.
+
+## D28 — Native runtime binding v2 và explicit checkpoint (2026-10-14)
+
+Normalize native `config`/`runtimeInfo` thay vì pin null từ fields phẳng. Binding mới từ chối giá trị thiếu/mâu thuẫn và phát hiện drift settings/model/thinking/mode. Lease cũ giữ v1 trong epoch đang chạy, được đánh dấu unverified, không tự repin; epoch mới cần explicit Human checkpoint rebind hoặc release/bind. Rebind giữ nguyên proof và Human decision boundary.
+
+Peer thiếu self-ID được phép báo null để Lead correlate bằng canonical creation assignment duy nhất, có receipt. Không quy lỗi callback cho global MCP injection từ tương quan; dùng fixture offline trước và một automatic episode có tiêu chí fail rõ ràng sau đó.

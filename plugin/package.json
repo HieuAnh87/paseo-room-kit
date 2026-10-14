@@ -1,0 +1,22 @@
+{
+  "name": "paseo-room-flow-plugin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.client.json",
+    "test": "node --experimental-strip-types --test test/*.test.ts"
+  },
+  "dependencies": {
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.9.0",
+    "@tanstack/react-query": "^5.90.0",
+    "@types/node": "^22.15.0",
+    "@types/react": "~19.2.0",
+    "react": "^19.1.0",
+    "react-native": "^0.81.5",
+    "typescript": "^5.9.3"
+  }
+}
