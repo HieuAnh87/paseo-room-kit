@@ -34,3 +34,20 @@ test("bounded event retry covers creation race but never retries uncertain deliv
   await handler({agent: {id:peerId, provider:"claude-reviewer"}});
   assert.equal(attempts, 2); cleanup();
 });
+
+for (const provider of ["antigravity-cli", "claude-ui"]) {
+  test(`UI lifecycle ${provider} reaches canonical assignment validation`, async () => {
+    let handler: (event: {agent: {id: string; provider: string}}) => Promise<void> = async () => {};
+    const calls: string[][] = [];
+    const server = {on(_name: string, fn: typeof handler) {handler = fn; return () => {};}} as unknown as PluginServerContext;
+    const cleanup = startRelay(server, {
+      run: async (args) => {calls.push(args); return {state: "DELIVERED"};},
+      publish: () => {}, unpublish: () => {}, delay: async () => {},
+    });
+    await handler({agent: {id: peerId, provider}});
+    await handler({agent: {id: leadId, provider: "claude-lead"}});
+    await handler({agent: {id: "invalid", provider}});
+    assert.deepEqual(calls, [["callback-sweep"], ["callback", "--agent-id", peerId]]);
+    cleanup();
+  });
+}
