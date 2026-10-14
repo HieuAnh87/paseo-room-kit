@@ -60,3 +60,65 @@ Validation: fixture offline cho mode, binding drift, epoch/assignment, stale
 DONE, concurrent dedupe, timeout/no retry, transport selection và lifecycle
 hook. Kiểm tra plugin running và heartbeat trên daemon thật không phải paid E2E
 Peer → Lead. Probe trước đó vẫn là FAIL lịch sử; không relabel thành PASS.
+
+## Outbox v2 cho binding mới
+
+Binding mới có `callback_outbox_version=2`. Binding cũ giữ relay v1 đến khi
+withdraw và bind mới ở checkpoint: proxy dài hạn của Lead cũ có thể vẫn dùng
+code cũ, nên không nâng cấp lease đang chạy bằng cách sửa JSON.
+
+V2 lưu nguyên handback (tối đa 64 KiB), identity Lead/Peer, epoch, assignment,
+activity counter và digest trước khi gửi. Message ID cố định theo
+Peer/epoch/assignment/activity counter; retry dùng lại ID và payload đó.
+Đây là chống trùng tại outbox; Paseo chưa có recipient idempotency receipt cho
+API này nên không tuyên bố exactly-once delivery.
+
+`READY → SENDING → DELIVERED | REJECTED | UNCERTAIN`. `READY` có thể được gửi từ
+payload đã lưu khi reconcile, không cần đọc lại timeline. Authority hết hiệu lực
+thì `CANCELLED`. Process lock theo Peer ngăn hai sender đồng thời. Trong lúc gửi,
+registry không giữ global lock; reservation `SENDING` chặn thay đổi đúng lease đó
+ở cả proxy và role guard. Lease khác vẫn đọc/ghi được.
+
+Nếu sender chết ở `SENDING`, process lock được OS thả; lần reconcile sau đánh dấu
+`UNCERTAIN`, kể cả khi chưa biết request đã tới daemon hay chưa. Payload và ID
+vẫn còn. Receipt v1 không được tự hydrate hoặc replay. Receipt không accept task.
+
+Owner đọc nội dung và CAS hiện tại:
+
+```sh
+paseo-room-workflow callback-outbox --lead-id UUID
+```
+
+Owner tạo request JSON với `leadAgentId`, `messageId`, `expectedWorkEpoch`,
+`expectedRevision`, `resolution` và `evidence`, rồi preview/apply:
+
+```sh
+paseo-room-workflow resolve-callback /absolute/path/to/request.json
+paseo-room-workflow resolve-callback /absolute/path/to/request.json --apply
+```
+
+`DELIVERED` hoặc `NOT_DELIVERED` chỉ giải quyết một receipt `UNCERTAIN`/`SENDING`
+sau khi xác minh phía nhận; từ chối nếu sender còn sống. `NOT_DELIVERED` chuyển
+sang `REJECTED`, chưa gửi lại. Muốn gửi lại cần request `RETRY` riêng, CAS mới,
+evidence và assignment vẫn hiện hành; chỉ receipt v2 `REJECTED` được retry.
+Lifecycle hook vẫn best effort, startup sweep hữu hạn, chưa có guaranteed wake
+cho mọi event bị mất. Outbox bảo vệ handback đã capture, không thay thế event log.
+
+### Kết quả thử ngày 2026-10-14
+
+Gate offline: 177 repository tests (24 callback), 54 role-guard tests, 2 plugin
+tests và plugin typecheck pass. Callback fixtures có process exit thật sau
+network send, crash trước send, READY resume từ payload cũ, duplicate/concurrent
+delivery, stale epoch/assignment, payload corruption, Human resolution/CAS,
+legacy binding và khóa không chặn lease khác.
+
+Một LP mới chạy trên fixture riêng với Lead GPT-6.1-Sol/High và đúng một Peer
+GPT-6-Luna/High. Outbox lưu một payload v2, tự giao đúng Lead, receipt DELIVERED
+với zero transport retries. Lần chạy nghiêm ngặt đầu bị BLOCKED ở report schema:
+Peer trả evidence dạng array thay vì string. Đã làm rõ prompt schema; cùng Lead
+được một follow-up chuẩn hóa evidence đã nhận, không gọi lại hay tạo thêm Peer.
+Sau đó check cố định PASSED (exit 0, candidate ổn định), task ACCEPTED, Peer
+archived và final handback HANDBACK_READY. Đây là engineering acceptance sau
+report normalization; không phải Human acceptance hoặc strict first-run E2E PASS.
+Fixture tracked không thay đổi; tooling tạo metadata `.serena` chưa tracked.
+Binding/session smoke đã đóng; các lease trước đó không được nâng cấp.

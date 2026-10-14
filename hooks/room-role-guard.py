@@ -452,11 +452,16 @@ def locked_leases() -> Iterator[dict[str, Any]]:
                 lease.setdefault("handback_epoch", 0)
                 lease.setdefault("decision_state", "WORKING")
                 lease.setdefault("legacy_epoch_unknown", True)
+        fenced = {key: copy.deepcopy(lease) for key, lease in value["leases"].items()
+                  if workflow.callback_sending(lease)}
         try:
             yield value
         finally:
-            write_json_atomic(path, value)
-            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
+            try:
+                workflow.protect_callback_fences(fenced, value["leases"])
+                write_json_atomic(path, value)
+            finally:
+                fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 def iter_agent_records() -> Iterator[dict[str, Any]]:
@@ -758,6 +763,7 @@ def reserve_lead_lease(
         leases[workspace_id] = {
             "state": "pending",
             "runtime_binding_version": workflow.RUNTIME_BINDING_VERSION,
+            "callback_outbox_version": 2,
             "authority_mode": "parented",
             "execution_mode": "SLP",
             "task_class": task_class,
@@ -863,7 +869,8 @@ def guard_create_agent(
             "peerAgentId (your own Paseo identity), kind and payload. "
             "If your own identity is unavailable, use peerAgentId=null; do not guess or probe identity. "
             "Lead will correlate only the exact canonical creation assignment. "
-            "payload.evidence must name actual artifacts/checks and their limits. "
+            "payload.evidence must be a non-empty STRING naming actual artifacts/checks and their limits, not an array or object. "
+            'Example payload: {"evidence":"Read fixture.txt; observed the requested marker; no broader checks performed."}. '
             "For REVIEW add payload.candidateDigest and payload.verdict=APPROVE|FINDINGS. "
             "Otherwise kind=HANDOFF|REOPEN_REQUEST|DEPENDENCY_REQUEST|BLOCKED|PROGRESS. "
             "Keep the Task outcome line for native callback compatibility. "
@@ -1049,6 +1056,9 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
         deny(f"{tool_name} requires an explicit agentId.")
     caller = current_agent_id()
     if target == caller and tool_name in {"update_agent", "set_agent_mode"}:
+        own_lease = managed_lease_for_target(lead_id=caller)
+        if own_lease and workflow.callback_sending(own_lease):
+            deny("Callback send is in flight; Lead runtime mutation must wait.")
         if role == "lead" and tool_name == "update_agent":
             own_record = find_agent(caller)
             own_labels = own_record.get("labels") if isinstance(own_record, dict) else None
@@ -1093,6 +1103,8 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
                     deny(f"Peer authority label {key} is proxy-owned.")
     if not owned:
         deny(f"Target {target} is not bound to the current {role} authority.")
+    if lease and workflow.callback_sending(lease):
+        deny("Callback send is in flight; managed agent mutation must wait.")
     if role == "supervisor" and tool_name == "update_agent":
         guard_lifecycle_label_update(tool_input.get("labels"), labels)
 
@@ -1235,6 +1247,8 @@ def reconcile_archived_leases(
     released_at = isoformat(now or utc_now())
     for lease in registry["leases"].values():
         if not isinstance(lease, dict) or lease.get("state") != "active":
+            continue
+        if workflow.callback_sending(lease):
             continue
         lead_id = lease.get("lead_agent_id")
         record_state, record = agent_record_status(
