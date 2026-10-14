@@ -311,6 +311,18 @@
     {
       "source": "callback-plugin/test/relay.test.ts",
       "destination": "callback-plugin/test/relay.test.ts"
+    },
+    {
+      "source": "config/claude/ui.instructions.md.tmpl",
+      "destination": "config/claude/ui.instructions.md.tmpl"
+    },
+    {
+      "source": "config/claude/ui.settings.json.tmpl",
+      "destination": "config/claude/ui.settings.json.tmpl"
+    },
+    {
+      "source": "config/claude/ui.mcp.json.tmpl",
+      "destination": "config/claude/ui.mcp.json.tmpl"
     }
   ]
 }

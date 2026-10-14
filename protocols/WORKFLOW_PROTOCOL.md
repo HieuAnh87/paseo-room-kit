@@ -47,7 +47,7 @@ After a successful final handback, the proxy changes the Lead to:
 Lead creates a Peer with:
 
 - `role=peer`
-- `route=impl|impl_deep|search|ui|research|audit`
+- `route=impl|impl_deep|search|ui|ui_opus|research|audit`
 - `stack_profile=standard`
 - `room_kind=managed_slp`
 - `work_epoch=<current Lead epoch>`
@@ -218,3 +218,5 @@ Use a Paseo-managed worktree for engineering objectives that may mutate a reposi
 For multiple Peer writers or prerequisite-sensitive work, define the optional task ledger before creating any Peer in that epoch. Use `inspect_work_tasks` for current epoch/revision, then `define_work_task` with objective, literal scope, write disposition, existing prerequisites and required repository recipes. Create each Peer with matching `task_id` and `task_revision` labels. Use scout disposition for inspection-only search/research. A ledger cannot be introduced around already-dispatched Peers.
 
 Only dispatch a prerequisite-ready task. After quiescing its Peer, run fixed repository recipes through `run_work_check`, inspect the candidate-bound receipts, and explicitly `settle_work_task` as ACCEPTED or CANCELLED with evidence. Idle/callback does not accept a task. Reopen failed prerequisites through `reopen_work_task`; hold descendant dispatch/acceptance and quiesce their existing writers without silently releasing scope. Final handback requires all current tasks settled. An interrupted RUNNING check requires owner inspection and owner-shell `resolve-check`; never retry uncertain execution or manufacture a passing receipt. These are dispatch/evidence contracts, not filesystem sandboxes or Human acceptance.
+
+UI routing: `ui` uses Antigravity Gemini 3.8 Flash High; `ui_opus` uses Claude Opus 5.5 High with non-empty `ui_choice_reason`. UI work is bounded engineering, separate from read-only `audit`. No silent fallback to Codex or automatic replacement Peer after a provider failure. Require actual visual evidence and disclose unavailable checks.

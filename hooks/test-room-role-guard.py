@@ -30,7 +30,8 @@ class RoomRoleGuardTest(unittest.TestCase):
                         "impl": "codex-peer/gpt-6-luna",
                         "impl_deep": "codex-peer/gpt-6-luna",
                         "search": "codex-peer/gpt-6-luna",
-                        "ui": "gemini-ui/gemini-3.6-flash-medium",
+                        "ui": "antigravity-cli/gemini-3.8-flash",
+                        "ui_opus": "claude-ui/claude-opus-5-5",
                         "research": "opencode-peer/aibox/deepseek-v4-flash",
                         "audit": "claude-reviewer/claude-opus-5-5",
                         "impl_budget": "opencode-peer/aibox/deepseek-v4-flash",
@@ -386,6 +387,46 @@ class RoomRoleGuardTest(unittest.TestCase):
                     "labels": {"route": "search"}, "settings": {"thinkingOptionId": level},
                 }), self.lead_id)
                 self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_ui_routes_pin_high_and_writable_modes(self) -> None:
+        for route, provider, mode in (("ui", "antigravity-cli/gemini-3.8-flash", "accept-edits"),
+                                      ("ui_opus", "claude-ui/claude-opus-5-5", "acceptEdits")):
+            labels = {"route": route, "ui_choice_reason": "Human requested Opus for this UI task"}
+            result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {
+                "provider": provider, "title": "UI Peer", "initialPrompt": "Polish assigned frontend.",
+                "labels": labels, "settings": {},
+            }), self.lead_id)
+            updated = result["hookSpecificOutput"]["updatedInput"]
+            self.assertEqual(updated["settings"], {"thinkingOptionId": "high", "modeId": mode})
+            self.assertEqual(updated["labels"]["disposition"], "engineer")
+            self.assertEqual(updated["labels"]["write_mode"], "write")
+            self.assertIn("Do not spawn subagents", updated["initialPrompt"])
+            self.assertIn("non-empty STRING", updated["initialPrompt"])
+
+    def test_ui_rejects_wrong_provider_effort_and_silent_opus(self) -> None:
+        cases = [
+            ("ui", "codex-peer/gpt-6-luna", {}, {}),
+            ("ui", "antigravity-cli/gemini-3.8-flash", {"thinkingOptionId": "medium"}, {}),
+            ("ui_opus", "claude-ui/claude-opus-5-5", {}, {}),
+            ("ui_opus", "claude-reviewer/claude-opus-5-5", {}, {"ui_choice_reason": "Human request"}),
+        ]
+        for route, provider, settings, extra in cases:
+            result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {
+                "provider": provider, "title": "UI Peer", "initialPrompt": "Polish frontend.",
+                "labels": {"route": route, **extra}, "settings": settings,
+            }), self.lead_id)
+            self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_ui_runtime_cannot_be_switched_in_place(self) -> None:
+        peer_id = "ui-peer-fixture"
+        self.write_agent({"id": peer_id, "workspaceId": "workspace-project", "provider": "antigravity-cli",
+                          "labels": {"role": "peer", "route": "ui", "paseo.parent-agent-id": self.lead_id,
+                                     "room_kind": "managed_slp", "work_epoch": "1"}})
+        for tool, args in (("update_agent", {"settings": {"model": "other-model"}}),
+                           ("update_agent", {"labels": {"route": "impl"}}),
+                           ("set_agent_mode", {"modeId": "plan"})):
+            result = self.run_guard("lead", self.pre("mcp__paseo__" + tool, {"agentId": peer_id, **args}), self.lead_id)
+            self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_lead_post_dispatch_captures_exact_brief_once_and_bounds_context(self) -> None:
         result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {

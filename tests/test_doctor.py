@@ -75,7 +75,7 @@ class DoctorTest(unittest.TestCase):
             ROOT / "config/codex/watcher.config.toml.tmpl",
             self.home / ".codex/watcher.config.toml",
         )
-        for role in ("peer", "watcher"):
+        for role in ("peer", "watcher", "ui"):
             for asset in ("instructions.md", "settings.json", "mcp.json"):
                 self._render(
                     ROOT / f"config/claude/{role}.{asset}.tmpl",

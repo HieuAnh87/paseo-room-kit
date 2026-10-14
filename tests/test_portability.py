@@ -73,6 +73,8 @@ class PortabilityTest(unittest.TestCase):
             "codex-lead",
             "claude-lead",
             "claude-reviewer",
+            "claude-ui",
+            "antigravity-cli",
             "codex-watcher",
             "codex-peer",
             "opencode-peer",
@@ -148,6 +150,14 @@ class PortabilityTest(unittest.TestCase):
         reviewer = value["agents"]["providers"]["claude-reviewer"]
         self.assertEqual(reviewer["models"][0]["id"], "claude-opus-5-5")
         self.assertEqual(reviewer["models"][0]["thinkingOptions"][0]["id"], "high")
+        ui = value["agents"]["providers"]["claude-ui"]
+        self.assertEqual(ui["command"][-1], "ui")
+        self.assertEqual(ui["models"][0]["id"], "claude-opus-5-5")
+        ui_settings = json.loads((ROOT / "config/claude/ui.settings.json.tmpl").read_text().replace("{{HOME}}", str(home)))
+        self.assertNotIn("Edit", ui_settings["permissions"]["deny"])
+        self.assertIn("Agent", ui_settings["permissions"]["deny"])
+        self.assertIn("Edit", json.loads((ROOT / "config/claude/peer.settings.json.tmpl").read_text().replace("{{HOME}}", str(home)))["permissions"]["deny"])
+        self.assertEqual(value["agents"]["providers"]["antigravity-cli"]["models"][0]["thinkingOptions"], [{"id":"high", "label":"High", "isDefault":True}])
         watcher = value["agents"]["providers"]["codex-watcher"]
         self.assertEqual(watcher["models"][0]["id"], "gpt-6-luna")
         self.assertEqual(watcher["models"][0]["thinkingOptions"][0]["id"], "medium")
