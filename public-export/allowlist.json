@@ -125,24 +125,8 @@
       "destination": "config/codex/supervisor.config.toml.tmpl"
     },
     {
-      "source": "config/opencode/paseo-lead.instructions.md.tmpl",
-      "destination": "config/opencode/paseo-lead.instructions.md.tmpl"
-    },
-    {
-      "source": "config/opencode/paseo-lead.json.tmpl",
-      "destination": "config/opencode/paseo-lead.json.tmpl"
-    },
-    {
       "source": "config/opencode/paseo-peer.json",
       "destination": "config/opencode/paseo-peer.json"
-    },
-    {
-      "source": "config/opencode/paseo-supervisor.instructions.md.tmpl",
-      "destination": "config/opencode/paseo-supervisor.instructions.md.tmpl"
-    },
-    {
-      "source": "config/opencode/paseo-supervisor.json.tmpl",
-      "destination": "config/opencode/paseo-supervisor.json.tmpl"
     },
     {
       "source": "config/paseo/config.json.tmpl",
@@ -267,6 +251,66 @@
     {
       "source": "tests/test_land.py",
       "destination": "tests/test_land.py"
+    },
+    {
+      "source": "config/codex/watcher.config.toml.tmpl",
+      "destination": "config/codex/watcher.config.toml.tmpl"
+    },
+    {
+      "source": "bin/room_tasks.py",
+      "destination": "bin/room_tasks.py"
+    },
+    {
+      "source": "tests/test_tasks.py",
+      "destination": "tests/test_tasks.py"
+    },
+    {
+      "source": "tests/test_codex_model_catalog.py",
+      "destination": "tests/test_codex_model_catalog.py"
+    },
+    {
+      "source": "tests/test_native_binding.py",
+      "destination": "tests/test_native_binding.py"
+    },
+    {
+      "source": "tests/test_room_modes.py",
+      "destination": "tests/test_room_modes.py"
+    },
+    {
+      "source": "tests/test_room_callbacks.py",
+      "destination": "tests/test_room_callbacks.py"
+    },
+    {
+      "source": "callback-plugin/package.json",
+      "destination": "callback-plugin/package.json"
+    },
+    {
+      "source": "callback-plugin/package-lock.json",
+      "destination": "callback-plugin/package-lock.json"
+    },
+    {
+      "source": "callback-plugin/paseo-plugin.json",
+      "destination": "callback-plugin/paseo-plugin.json"
+    },
+    {
+      "source": "callback-plugin/tsconfig.json",
+      "destination": "callback-plugin/tsconfig.json"
+    },
+    {
+      "source": "callback-plugin/OVERVIEW.md",
+      "destination": "callback-plugin/OVERVIEW.md"
+    },
+    {
+      "source": "callback-plugin/index.server.ts",
+      "destination": "callback-plugin/index.server.ts"
+    },
+    {
+      "source": "callback-plugin/server/relay.ts",
+      "destination": "callback-plugin/server/relay.ts"
+    },
+    {
+      "source": "callback-plugin/test/relay.test.ts",
+      "destination": "callback-plugin/test/relay.test.ts"
     }
   ]
 }

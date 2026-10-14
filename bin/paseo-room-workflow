@@ -12,6 +12,7 @@ import sys
 
 import room_workflow as workflow
 import room_land
+import room_tasks
 
 
 def proxy_module():
@@ -41,13 +42,22 @@ def main() -> int:
     bind = commands.add_parser("bind", help="Human binds an existing root Lead; never creates an agent")
     bind.add_argument("--lead-id", required=True)
     bind.add_argument("--supervisor-id")
-    bind.add_argument("--task-class", default="bounded")
+    bind.add_argument("--mode", choices=("L", "LP", "SLP"))
+    bind.add_argument("--task-class")
     bind.add_argument("--apply", action="store_true")
     commands.add_parser("decisions", help="read the Human decision queue")
     commands.add_parser("bindings", help="inspect canonical authority versions, including working rooms")
+    callback = commands.add_parser("callback", help="trusted plugin: deliver a fenced lifecycle callback")
+    callback.add_argument("--agent-id", required=True)
+    commands.add_parser("callback-sweep", help="trusted plugin: one startup reconciliation, no polling")
     asks = commands.add_parser("asks", help="read open questions and attention for a managed Lead")
     asks.add_argument("--lead-id", required=True)
-    for name in ("decide", "reopen", "resolve", "archive", "withdraw", "answer-ask"):
+    observations = commands.add_parser("observations", help="read brief, handback, resolution and steering evidence")
+    observations.add_argument("--lead-id", required=True)
+    task_list = commands.add_parser("tasks", help="read current task graph, reservations and executor receipts")
+    task_list.add_argument("--lead-id", required=True)
+    for name in ("decide", "reopen", "resolve", "archive", "withdraw", "answer-ask",
+                 "authorize-peer-steering", "steer-peer", "resolve-peer-steering", "resolve-check", "rebind-runtime"):
         operation = commands.add_parser(name, help="protected Human operation; dry-run by default")
         operation.add_argument("request", type=pathlib.Path, help="JSON arguments copied from the current queue")
         operation.add_argument("--apply", action="store_true")
@@ -55,7 +65,12 @@ def main() -> int:
     # Cooperative owner-shell separation; this is not OS authentication.
     if args.command != "snapshot" and os.environ.get("PASEO_ROOM_ROLE"):
         raise workflow.WorkflowError("Human setup/control requires an ordinary owner shell, outside a managed role")
-    if args.command == "snapshot":
+    if args.command in {"callback", "callback-sweep"}:
+        if os.environ.get("ROOM_CALLBACK_SERVICE") != "1":
+            raise workflow.WorkflowError("Callback service invocation is required")
+        proxy = proxy_module()
+        result = proxy.relay_room_callback(args.agent_id) if args.command == "callback" else proxy.reconcile_room_callbacks()
+    elif args.command == "snapshot":
         result = workflow.snapshot(args.repository)
     elif args.command == "init":
         root = args.repository.resolve(strict=True)
@@ -106,27 +121,47 @@ def main() -> int:
             else:
                 result = room_land.apply(proxy, plan, args.approve_plan_digest)
         elif args.command == "bind":
-            result = proxy.bind_root_lead(args.lead_id, args.supervisor_id, args.task_class, apply=args.apply)
+            mode = args.mode or ("SLP" if args.supervisor_id else "LP")
+            result = proxy.bind_root_lead(args.lead_id, args.supervisor_id,
+                args.task_class or ("tiny" if mode == "L" else "bounded"),
+                apply=args.apply, execution_mode=mode)
         elif args.command == "decisions":
             result = proxy.list_slp_decisions("human", "human", "human-queue", {})
         elif args.command == "asks":
             result = proxy.list_room_attention("human", "human", "human-asks", {"leadAgentId": args.lead_id})
+        elif args.command == "observations":
+            result = proxy.list_room_observations("human", "human", "human-observations", {"leadAgentId": args.lead_id})
+        elif args.command == "tasks":
+            with proxy.read_locked_leases() as registry:
+                lease = proxy.lead_lease(registry, args.lead_id)
+                if not lease:
+                    raise workflow.WorkflowError("No active managed Lead")
+                result = {"work_epoch": lease["work_epoch"], "revision": lease["revision"], **room_tasks.epoch_state(lease)}
         elif args.command == "bindings":
-            with proxy.locked_leases() as registry:
-                fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest")
+            with proxy.read_locked_leases() as registry:
+                fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "execution_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest", "runtime_binding_version", "runtime_binding")
                 result = {"bindings": [{key: lease.get(key) for key in fields} for lease in registry["leases"].values()]}
         else:
             request = json.loads(args.request.read_text())
             if not isinstance(request, dict):
                 raise workflow.WorkflowError("Request must be a JSON object")
-            if args.command == "withdraw":
+            if args.command == "rebind-runtime":
+                result = proxy.rebind_runtime(request, apply=args.apply)
+            elif args.command == "withdraw":
                 result = proxy.withdraw_binding(request, apply=args.apply)
+            elif args.command == "resolve-check":
+                result = proxy.resolve_work_check(request, apply=args.apply)
             elif not args.apply:
                 result = {"applied": False, "operation": args.command, "arguments": request}
+            elif args.command == "authorize-peer-steering":
+                result = proxy.authorize_peer_steering(request)
+            elif args.command == "resolve-peer-steering":
+                result = proxy.resolve_peer_steering(request)
             else:
                 operation = {"decide": proxy.record_slp_decision, "reopen": proxy.reopen_work_epoch,
                              "resolve": proxy.resolve_slp_delivery, "archive": proxy.archive_slp_workspace,
-                             "answer-ask": proxy.answer_room_ask}[args.command]
+                             "answer-ask": proxy.answer_room_ask,
+                             "steer-peer": proxy.steer_room_peer}[args.command]
                 result = operation("human", "human", "human-" + args.command, request)
     print(json.dumps(result, indent=2, sort_keys=True))
     if isinstance(result, dict) and ("error" in result or result.get("result", {}).get("isError")):

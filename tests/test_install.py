@@ -165,12 +165,10 @@ class InstallTest(unittest.TestCase):
             "codex-lead",
             "claude-lead",
             "claude-reviewer",
-            "claude-watcher",
+            "codex-watcher",
             "codex-peer",
             "opencode-peer",
-            "opencode-supervisor",
-            "opencode-lead",
-            "gemini-ui",
+                            "gemini-ui",
         ):
             self.assertIs(providers[provider_id]["paseoTools"]["enabled"], False)
         backups = list(

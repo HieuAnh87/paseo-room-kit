@@ -32,6 +32,9 @@ Bộ tài liệu này mô tả toàn bộ setup Paseo hiện tại trên máy `$
 | Context window và compaction cho Lead | [16-context-window-and-compaction-research.md](16-context-window-and-compaction-research.md) |
 | Workflow chung, direct Lead, candidate review và drift | [17-provider-independent-workflow.md](17-provider-independent-workflow.md) |
 | Attention, Flow/Health và Land tùy chọn | [18-attention-and-land.md](18-attention-and-land.md) |
+| Đối chiếu toàn bài SLP và giới hạn kiểm chứng | [19-slp-article-review.md](19-slp-article-review.md) |
+| Các repo khác cấp tool, giữ identity và chuyển kết quả thế nào | [23-external-callback-patterns.md](23-external-callback-patterns.md) |
+| Đọc sâu Piggery: identity, mailbox, ack, topology và recovery | [24-piggery-deep-review.md](24-piggery-deep-review.md) |
 | Workspace/agent records hiện có | [references/runtime-inventory.md](references/runtime-inventory.md) |
 
 ## Source of truth
@@ -61,8 +64,11 @@ Tài liệu này là bản giải thích và snapshot; các file dưới đây m
 
 Inventory snapshot rộng được chụp ngày `2026-08-03` lúc khoảng `18:55`
 (Asia/Ho_Chi_Minh) và có thể stale. Paseo baseline riêng đã được revalidate và
-pin ở `0.9.1`; dùng doctor live để xác nhận runtime hiện tại.
+pin ở `0.11.2`; dùng doctor live để xác nhận runtime hiện tại.
 
 Portable kit không commit `snapshots/`: chúng chứa runtime identity, đường dẫn và trạng thái dễ lỗi thời. Chạy `../scripts/doctor.sh --live` trên từng máy để kiểm tra routing/runtime. `auth.json`, URI database, API key, token, password và secret environment luôn nằm ngoài repository.
 
 Thông tin bên ngoài được dùng để giải thích ACP/Paseo có link trong [08-provider-integrations.md](08-provider-integrations.md); phần mô tả runtime local được lấy trực tiếp từ máy này.
+
+- [21 — Routing và task ledger](21-routing-and-task-ledger.md)
+- [22 — L / LP / SLP và callback](22-modes-and-callback.md)

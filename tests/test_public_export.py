@@ -52,6 +52,7 @@ EXPECTED_PAYLOADS = {
     "bin/room_workflow.py",
     "bin/room_attention.py",
     "bin/room_land.py",
+    "bin/room_tasks.py",
     "config/claude/lead.instructions.md.tmpl",
     "config/claude/lead.mcp.json.tmpl",
     "config/claude/lead.settings.json.tmpl",
@@ -68,11 +69,8 @@ EXPECTED_PAYLOADS = {
     "config/codex/model-instructions.md",
     "config/codex/peer.config.toml.tmpl",
     "config/codex/supervisor.config.toml.tmpl",
-    "config/opencode/paseo-lead.instructions.md.tmpl",
-    "config/opencode/paseo-lead.json.tmpl",
+    "config/codex/watcher.config.toml.tmpl",
     "config/opencode/paseo-peer.json",
-    "config/opencode/paseo-supervisor.instructions.md.tmpl",
-    "config/opencode/paseo-supervisor.json.tmpl",
     "config/paseo/config.json.tmpl",
     "config/paseo/orchestration-preferences.json",
     "docs/architecture.md",
@@ -96,9 +94,22 @@ EXPECTED_PAYLOADS = {
     "tests/test_workflow.py",
     "tests/test_attention.py",
     "tests/test_land.py",
+    "tests/test_tasks.py",
+    "tests/test_codex_model_catalog.py",
+    "tests/test_native_binding.py",
     "tests/test_doctor.py",
     "tests/test_install.py",
     "tests/test_public_export.py",
+    'tests/test_room_modes.py',
+    'tests/test_room_callbacks.py',
+    'callback-plugin/package.json',
+    'callback-plugin/package-lock.json',
+    'callback-plugin/paseo-plugin.json',
+    'callback-plugin/tsconfig.json',
+    'callback-plugin/OVERVIEW.md',
+    'callback-plugin/index.server.ts',
+    'callback-plugin/server/relay.ts',
+    'callback-plugin/test/relay.test.ts',
 }
 
 EXCLUDED_SOURCE_PATHS = {
@@ -120,7 +131,7 @@ class PublicExportTest(unittest.TestCase):
         root_lock = json.loads(
             (ROOT / "versions.lock.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(root_lock["paseo"], "0.9.1")
+        self.assertEqual(root_lock["paseo"], "0.11.2")
 
         public_lock_path = ROOT / "public-export/versions.lock.json"
         if not public_lock_path.is_file():
@@ -235,14 +246,15 @@ class PublicExportTest(unittest.TestCase):
                 environment = os.environ.copy()
                 environment["PYTHONDONTWRITEBYTECODE"] = "1"
                 environment["PASEO_APP_PATH"] = str(parent / "no-paseo-app")
-                return subprocess.run(
+                result = subprocess.run(
                     command,
                     cwd=artifact,
-                    check=True,
                     capture_output=True,
                     env=environment,
                     text=True,
                 )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result
 
             run("./scripts/doctor.sh", "--repo")
             run(sys.executable, "tests/test_public_export.py")
@@ -491,6 +503,14 @@ upstream: https://github.com/example/upstream
                 ),
             )
             return SCANNER.scan_public_artifact(artifact)
+
+    def test_scanner_allows_runtime_generation_and_fixture_attributes(self) -> None:
+        content = "run_" + "id = uuid.uuid4().hex\n"
+        content += "registry = {fixtures.WORKSPACE_" + "ID: lease}\n"
+        self.assertEqual(self._scan_fixture(content, "fixture.py"), [])
+        content += 'run_' + 'id = "private-runtime-123456789"\n'
+        findings = self._scan_fixture(content, "fixture.py")
+        self.assertTrue(any(finding.rule == "runtime-id" for finding in findings))
 
 
 if __name__ == "__main__":

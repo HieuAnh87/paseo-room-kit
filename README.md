@@ -16,18 +16,23 @@ The repository contains role profiles, provider routing, the role-aware Paseo MC
 - Lead is the sole engineering owner inside one project workspace.
 - Peer performs one bounded assignment and returns evidence to Lead.
 - Supervisor and Lead receive the role-aware Paseo MCP proxy.
-- The Human can choose Codex, isolated Claude Opus, or the DeepSeek budget Supervisor front door.
+- The Human can choose Codex or isolated Claude Opus Supervisor front doors.
 - Peer receives no Paseo control MCP.
 - Final Lead result uses `submit_work_result` (`handback_to_parent` remains an alias); the active binding selects governance delivery or the direct Human queue.
 - Managed lifecycle truth is fenced by `room_kind`, work epoch, revision, and
   evidence digest in the version-2 lease registry.
 - Native runtime state such as `idle` or `DONE` is not engineering acceptance.
-- Native Peer callbacks are primary; `recover_peer_callbacks` is a bounded,
+- Choose L, LP (default for new root bindings), or SLP at a Human checkpoint;
+  L blocks Peer dispatch and cannot weaken repository review gates. See
+  [modes and callbacks](docs/22-modes-and-callback.md).
+- Native scoped Peer callbacks are primary; the trusted `room-callback` plugin
+  supplies assignment-fenced lifecycle notifications when scoped tools are absent.
+  Dispatch fails closed if neither transport is ready. `recover_peer_callbacks` is a bounded,
   digest-deduplicated recovery path when an expected callback does not render.
 - Human accept/abandon, bounded reopen, uncertain delivery resolution, and
   archive use protected epoch-aware operations; generic prompt/archive bypasses
   are denied.
-- Custom internal SLP providers set Paseo 0.9.1 `paseoTools.enabled=false`;
+- Custom internal SLP providers set Paseo 0.11.2 `paseoTools.enabled=false`;
   the role-aware proxy remains their only Paseo control surface even if global
   tool injection is enabled later.
 - Legacy Lead visibility and cleanup use workspace + parentage + lease authority
@@ -63,23 +68,18 @@ agent work, and explicitly choosing to do so.
 
 After reload, `claude-supervisor/claude-opus-5-5` is available at High or XHigh
 as a parallel Human-facing front door. Codex Supervisor also offers High or
-XHigh on `gpt-6-sol`; both Supervisors default to XHigh. The stable Lead uses
-`gpt-6-sol` at XHigh (`codex-lead`). A Supervisor may
-autonomously select `claude-lead/claude-opus-5-5` at XHigh for a new bounded
+XHigh on `gpt-6.1-sol`; both Supervisors default to High. The stable Lead uses
+`gpt-6.1-sol` with High, XHigh (default) or Max (`codex-lead`). A Supervisor may
+autonomously select `claude-lead/claude-opus-5-5` with High, XHigh (default) or Max for a new bounded
 objective, with a 300K auto-compact window; an explicit owner preference wins.
 Each Lead owns one objective/workstream in one workspace, including its bounded
 Peer tasks and same-objective follow-ups. Selecting Claude for the Supervisor
 still does not transfer engineering ownership into the Supervisor.
 
 In the standard stack, bounded implementation/search Peers use GPT-6 Luna
-Medium, candidate review uses a fresh read-only Claude Opus 5.5 High Reviewer,
-and an independent Sonnet 5 Medium Watcher scans managed rooms every hour.
+High (default), XHigh or Max, candidate review uses a fresh read-only Claude Opus 5.5 High Reviewer,
+and an independent GPT-6 Luna Medium Watcher scans managed rooms daily at 01:00 Asia/Ho_Chi_Minh.
 
-The budget front door is `opencode-supervisor/aibox/deepseek-v4-flash` at Max.
-Selecting it deterministically activates the full budget stack:
-`opencode-lead/aibox/glm-5.2` Max for Lead, DeepSeek V4 Flash Max for every
-non-UI Peer route, and Gemini through agy for UI. It cannot silently fall back
-to the standard Codex or Claude stack.
 
 ## Existing-machine update
 
@@ -142,3 +142,5 @@ Review `.orchestration/workspace-protocol.md` and `workflow.json` before binding
 `bindings` shows authority versions; `decisions` shows Human choices. `decide`, `reopen`, `resolve`, `archive` and `withdraw` take a JSON request and preview unless `--apply` is supplied. Common gates bind protocol, runtime metadata, report correlation and review candidate across providers. No repository policy preserves legacy behavior; initialize it before binding to enable candidate gates. See [workflow protocol](protocols/WORKFLOW_PROTOCOL.md) for schemas and limits.
 
 Managed asks and Peer attention signals are available through the proxy; the owner shell can use `paseo-room-workflow asks --lead-id LEAD_ID` and `answer-ask REQUEST.json [--apply]`. A separate `land-prepare`/`land-apply` path can fast-forward an already accepted, committed candidate after exact Human plan approval. The optional Paseo 0.9.x Flow/Health plugin under [`plugin/`](plugin/) reads canonical state without taking authority. See [attention and land operations](docs/18-attention-and-land.md).
+
+Human owner-shell grants allow exact Peer steering with Lead notice first and completion routed to Lead. Lead-only `resolve_peer_report` keeps material reopen requests pending until evidence-backed disposition; changed work must match the final candidate. Read-only `list_room_observations` joins brief/report/disposition and steering receipts without inferring correctness or acceptance. See [the article comparison and validation limits](docs/19-slp-article-review.md).

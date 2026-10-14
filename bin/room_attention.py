@@ -7,6 +7,7 @@ authority or change the room's lifecycle, assignment or Human decision.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import Any
 
 MAX_ASKS_PER_LEASE = 256
@@ -14,6 +15,7 @@ MAX_OPEN_ASKS = 64
 MAX_ASK_ID = 120
 MAX_QUESTION = 2000
 MAX_ANSWER = 4000
+RESOLUTION_OUTCOMES = {"RESOLVED_BY_LEAD", "NEEDS_MORE_EVIDENCE", "ESCALATED_TO_HUMAN"}
 REMIND_AFTER = dt.timedelta(minutes=30)
 ESCALATE_AFTER = dt.timedelta(hours=2)
 
@@ -53,6 +55,25 @@ def asks_for(lease: dict[str, Any]) -> dict[str, dict[str, Any]]:
             ))
         ):
             raise AttentionError("managed room ask queue contains an invalid record")
+        if "resolution" in item:
+            resolution = item["resolution"]
+            if (not isinstance(resolution, dict)
+                or resolution.get("outcome") not in RESOLUTION_OUTCOMES
+                or any(not isinstance(resolution.get(key), str) or not resolution[key].strip()
+                       for key in ("decision", "evidence", "nextAction"))
+                or type(resolution.get("changesWork")) is not bool
+                or not isinstance(resolution.get("resolved_by"), str)):
+                raise AttentionError("managed room ask has an invalid resolution")
+            if (item.get("kind") != "REOPEN_REQUEST"
+                or (resolution["outcome"] == "RESOLVED_BY_LEAD") != (item["status"] == "ANSWERED")):
+                raise AttentionError("managed room resolution state is inconsistent")
+            if resolution["outcome"] != "RESOLVED_BY_LEAD" and any(
+                not isinstance(resolution.get(key), str) or not resolution[key].strip()
+                for key in ("owner", "checkpoint")
+            ):
+                raise AttentionError("pending resolution requires owner and checkpoint")
+            if resolution["changesWork"] and not isinstance(resolution.get("candidateDigest"), str):
+                raise AttentionError("changed-work resolution requires candidate evidence")
     return asks
 
 
@@ -98,12 +119,86 @@ def answer_ask(
         raise AttentionError("ask is absent or belongs to a different work epoch")
     if item.get("recipient_agent_id") != actor:
         raise AttentionError("only the responsible recipient may answer this ask")
+    if item.get("kind") == "REOPEN_REQUEST":
+        raise AttentionError("REOPEN_REQUEST needs resolve_peer_report with decision and evidence")
     if item["status"] == "ANSWERED":
         if item.get("answer") != answer or item.get("answered_by") != actor:
             raise AttentionError("ask was already answered with different evidence")
         return item, False
     item.update(status="ANSWERED", answer=answer, answered_by=actor, answered_at=answered_at)
     return item, True
+
+
+def reopen_obligations(lease: dict[str, Any]) -> list[dict[str, Any]]:
+    asks = asks_for(lease)
+    obligations = [item for item in asks.values() if item["work_epoch"] == lease["work_epoch"]
+                   and item.get("kind") == "REOPEN_REQUEST" and item["status"] == "OPEN"]
+    # Reports recorded before this feature still raise an obligation. Never infer
+    # closure merely because the old writer did not create an ask.
+    for report_id, receipt in reports_for(lease).items():
+        report = receipt["report"]
+        if report.get("workEpoch") == lease["work_epoch"] and report.get("kind") == "REOPEN_REQUEST" and "peer:" + report_id not in asks:
+            obligations.append({"report_id": report_id, "status": "OPEN", "resolution": {}})
+    return obligations
+
+
+def reports_for(lease: dict[str, Any]) -> dict[str, Any]:
+    reports = lease.get("peer_reports", {})
+    if not isinstance(reports, dict) or any(
+        not isinstance(key, str) or not isinstance(receipt, dict) or not isinstance(receipt.get("report"), dict)
+        for key, receipt in reports.items()
+    ):
+        raise AttentionError("room report receipt is invalid")
+    return reports
+
+
+def observations_for(lease: dict[str, Any]) -> dict[str, Any]:
+    """Join explicit receipts only. Missing evidence is unknown, never misconduct."""
+    reports = reports_for(lease)
+    briefs = lease.get("peer_briefs", {})
+    if not isinstance(reports, dict) or not isinstance(briefs, dict):
+        raise AttentionError("room observation evidence is invalid")
+    asks = asks_for(lease)
+    observations = []
+    current = []
+    for report_id, receipt in reports.items():
+        if not isinstance(receipt, dict) or not isinstance(receipt.get("report"), dict):
+            raise AttentionError("room report receipt is invalid")
+        report = receipt["report"]
+        if report.get("workEpoch") == lease["work_epoch"]:
+            current.append((report_id, receipt))
+    current.sort(key=lambda pair: (str(pair[1].get("recorded_at", "")), pair[0]))
+    for report_id, receipt in current[-64:]:
+        report = receipt["report"]
+        brief = briefs.get(report.get("peerAgentId"))
+        if not isinstance(brief, dict) or brief.get("assignment_id") != report.get("assignmentId") or brief.get("work_epoch") != report.get("workEpoch"):
+            brief = None
+        ask = asks.get(receipt.get("ask_id"))
+        handling = "UNKNOWN"
+        if ask:
+            resolution = ask.get("resolution")
+            handling = (resolution["outcome"] if resolution else
+                        "ANSWERED" if ask["status"] == "ANSWERED" else "PENDING")
+        elif report.get("kind") == "REOPEN_REQUEST":
+            handling = "PENDING"  # Legacy receipt still has an unresolved obligation.
+        handback = json.dumps(report.get("payload"), ensure_ascii=False, sort_keys=True)
+        observations.append({
+            "report_id": report_id, "peer_agent_id": report.get("peerAgentId"),
+            "assignment_id": report.get("assignmentId"), "kind": report.get("kind"),
+            "brief": brief, "brief_visibility": "OBSERVED" if brief else "UNKNOWN",
+            "handback": report.get("payload") if len(handback) <= 4000 else None,
+            "handback_excerpt": handback[:4000], "handback_truncated": len(handback) > 4000,
+            "report_digest": receipt.get("digest"),
+            "recorded_at": receipt.get("recorded_at"), "handling": handling,
+            "ask": ask,
+        })
+    grants = lease.get("peer_steering", {})
+    if not isinstance(grants, dict):
+        raise AttentionError("room steering evidence is invalid")
+    return {"observations": observations, "omitted_reports": max(0, len(current) - 64),
+            "steering": [dict(item, grant_id=key) for key, item in grants.items()
+                         if isinstance(item, dict) and item.get("work_epoch") == lease["work_epoch"]],
+            "interpretation": "Explicit communication evidence only; UNKNOWN is not a violation. No artifact, reasoning, or acceptance verdict is inferred."}
 
 
 def attention_for(item: dict[str, Any], now: dt.datetime, *, has_supervisor: bool) -> dict[str, Any]:

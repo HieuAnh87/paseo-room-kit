@@ -33,7 +33,7 @@ reaches the control plane when the caller lacks that role's authority.
 
 Managed lifecycle authority lives in a version-2 lease registry with
 `room_kind`, work epoch, revision, evidence digest, and reserved delivery
-transitions. Paseo 0.9.1 native tools are disabled per internal custom provider;
+transitions. Paseo 0.11.2 native tools are disabled per internal custom provider;
 the role-aware proxy is the only control surface. A future plugin may be a thin
 UI over protected operations, never a second lifecycle state machine.
 

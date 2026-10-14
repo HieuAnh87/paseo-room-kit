@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import contextlib
+import copy
 import datetime as dt
 import fcntl
 import json
@@ -23,6 +24,7 @@ if not (module_root / "room_workflow.py").is_file():
     module_root = pathlib.Path.home() / ".local/bin"
 sys.path.insert(0, str(module_root))
 import room_workflow as workflow
+import room_tasks as tasks
 
 PARENT_LABEL = "paseo.parent-agent-id"
 ROLE_LABEL = "role"
@@ -44,9 +46,9 @@ PEER_OUTCOMES = {
 }
 
 ROUTE_THINKING = {
-    "impl": "medium",
-    "impl_deep": "medium",
-    "search": "medium",
+    "impl": "high",
+    "impl_deep": "high",
+    "search": "high",
     "research": "max",
     "audit": "high",
 }
@@ -572,6 +574,8 @@ def resolve_lead_route(
     labels: dict[str, str],
 ) -> tuple[str, str, str]:
     profile = labels.get(LEAD_PROFILE_LABEL, "stable")
+    if profile == "budget":
+        deny("The budget stack has been retired.")
     provider_key = {
         "stable": "planning",
         "claude": "planning_claude",
@@ -600,11 +604,17 @@ def resolve_lead_route(
 def normalize_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("codex-lead/"):
         settings["modeId"] = "full-access"
-        settings["thinkingOptionId"] = "xhigh"
+        selected = settings.get("thinkingOptionId", "xhigh")
+        if selected not in {"high", "xhigh", "max"}:
+            deny("Lead thinking must be high, xhigh or max.")
+        settings["thinkingOptionId"] = selected
         return
     if provider.startswith("claude-lead/"):
         settings["modeId"] = "bypassPermissions"
-        settings["thinkingOptionId"] = "xhigh"
+        selected = settings.get("thinkingOptionId", "xhigh")
+        if selected not in {"high", "xhigh", "max"}:
+            deny("Lead thinking must be high, xhigh or max.")
+        settings["thinkingOptionId"] = selected
         return
     if provider.startswith("opencode-lead/"):
         settings["modeId"] = "build"
@@ -617,14 +627,14 @@ def validate_lead_settings(provider: str, settings: dict[str, Any]) -> None:
     if provider.startswith("codex-lead/"):
         if settings.get("modeId") != "full-access":
             deny("Codex Lead creation requires settings.modeId: full-access.")
-        if settings.get("thinkingOptionId") != "xhigh":
-            deny("Codex Lead creation requires thinkingOptionId: xhigh.")
+        if settings.get("thinkingOptionId") not in {"high", "xhigh", "max"}:
+            deny("Codex Lead creation requires thinkingOptionId: high, xhigh or max.")
         return
     if provider.startswith("claude-lead/"):
         if settings.get("modeId") != "bypassPermissions":
             deny("Claude Lead creation requires settings.modeId: bypassPermissions.")
-        if settings.get("thinkingOptionId") != "xhigh":
-            deny("Claude Lead creation requires thinkingOptionId: xhigh.")
+        if settings.get("thinkingOptionId") not in {"high", "xhigh", "max"}:
+            deny("Claude Lead creation requires thinkingOptionId: high, xhigh or max.")
         return
     if provider.startswith("opencode-lead/"):
         if settings.get("modeId") != "build":
@@ -641,6 +651,8 @@ def current_lead_stack_profile() -> str:
     if not isinstance(labels, dict):
         return "standard"
     stack_profile = labels.get(STACK_PROFILE_LABEL, "standard")
+    if stack_profile == "budget":
+        deny("The budget stack has been retired.")
     if stack_profile not in {"standard", "budget"}:
         deny(f"Unsupported Lead stack profile {stack_profile!r}.")
     return stack_profile
@@ -668,6 +680,8 @@ def current_lead_work_epoch() -> int:
         deny("Managed Lead room_kind label does not match lease authority.")
     if labels.get(WORK_EPOCH_LABEL) != str(epoch):
         deny("Managed Lead work_epoch label does not match lease authority.")
+    if lease.get("execution_mode") == "L":
+        deny("L mode cannot dispatch Peer; bind a new LP/SLP task for delegation.")
     try:
         workflow.verify_context(lease, record)
     except (workflow.WorkflowError, OSError) as error:
@@ -679,9 +693,16 @@ def peer_route_provider_key(route: str, stack_profile: str) -> str:
     return f"{route}_budget" if stack_profile == "budget" else route
 
 
-def peer_route_thinking(route: str, stack_profile: str) -> str | None:
+def peer_route_thinking(
+    route: str, stack_profile: str, settings: dict[str, Any] | None = None
+) -> str | None:
     if stack_profile == "budget" and route != "ui":
         return "max"
+    if stack_profile == "standard" and route in {"impl", "impl_deep", "search", "research", "ui"} and load_providers().get(route, "").startswith("codex-peer/"):
+        selected = (settings or {}).get("thinkingOptionId", "high")
+        if selected not in {"high", "xhigh", "max"}:
+            deny(f"Codex Peer route {route} requires high, xhigh or max thinking, not {selected!r}.")
+        return selected
     return ROUTE_THINKING.get(route)
 
 
@@ -736,7 +757,9 @@ def reserve_lead_lease(
 
         leases[workspace_id] = {
             "state": "pending",
+            "runtime_binding_version": workflow.RUNTIME_BINDING_VERSION,
             "authority_mode": "parented",
+            "execution_mode": "SLP",
             "task_class": task_class,
             "room_kind": MANAGED_ROOM_KIND,
             "work_epoch": 1,
@@ -812,6 +835,7 @@ def guard_create_agent(
         labels[STACK_PROFILE_LABEL] = stack_profile
         labels[ROOM_KIND_LABEL] = MANAGED_ROOM_KIND
         labels[WORK_EPOCH_LABEL] = str(epoch)
+        previous_assignment = labels.get("assignment_id")
         labels["assignment_id"] = uuid.uuid4().hex
         disposition = labels.get("disposition", "reviewer" if route == "audit" else "engineer").lower()
         if disposition not in {"engineer", "architect", "reviewer", "scout"}:
@@ -823,19 +847,29 @@ def guard_create_agent(
         prompt = updated.get("initialPrompt", "")
         if not isinstance(prompt, str):
             deny("Peer initialPrompt must be a string.")
+        marker = "\n\nPeer report correlation (preserve exactly):\n"
+        base, separator, generated = prompt.partition(marker)
+        if (separator and isinstance(previous_assignment, str) and previous_assignment in generated
+            and labels.get("room_brief_digest") == workflow.digest({"prompt": base})):
+            # Re-normalization by the proxy replaces its own metadata rather
+            # than giving the Peer two contradictory assignment envelopes.
+            prompt = base
+        labels["room_brief_digest"] = workflow.digest({"prompt": prompt})
         correlation = {"version": 1, "parentLeadId": current_agent_id(),
                        "workspaceId": current_workspace_id(tool_input),
                        "workEpoch": epoch, "assignmentId": labels["assignment_id"]}
-        updated["initialPrompt"] = prompt + "\n\nPeer report correlation (preserve exactly):\n" + json.dumps(correlation, sort_keys=True) + (
+        updated["initialPrompt"] = prompt + marker + json.dumps(correlation, sort_keys=True) + (
             "\nReturn a version-1 JSON report with these fields plus reportId (unique per report), "
             "peerAgentId (your own Paseo identity), kind and payload. "
+            "If your own identity is unavailable, use peerAgentId=null; do not guess or probe identity. "
+            "Lead will correlate only the exact canonical creation assignment. "
             "payload.evidence must name actual artifacts/checks and their limits. "
             "For REVIEW add payload.candidateDigest and payload.verdict=APPROVE|FINDINGS. "
             "Otherwise kind=HANDOFF|REOPEN_REQUEST|DEPENDENCY_REQUEST|BLOCKED|PROGRESS. "
             "Keep the Task outcome line for native callback compatibility. "
             + ("This is an inspection-only assignment: do not write files or change code." if disposition != "engineer" else "Own proof of writes within the assigned scope.")
         )
-        required_thinking = peer_route_thinking(route, stack_profile)
+        required_thinking = peer_route_thinking(route, stack_profile, settings)
         if required_thinking:
             settings["thinkingOptionId"] = required_thinking
         if provider.startswith("codex-peer/"):
@@ -844,6 +878,34 @@ def guard_create_agent(
             settings["modeId"] = "plan"
         if provider.startswith("opencode-peer/"):
             settings["modeId"] = "build"
+        with locked_leases() as registry:
+            lease = next((item for item in registry["leases"].values()
+                          if item.get("state") == "active" and item.get("lead_agent_id") == current_agent_id()), None)
+            if lease and tasks.epoch_state(lease)["tasks"]:
+                if lease.get("decision_state") != "WORKING" or lease.get("work_epoch") != epoch:
+                    deny("Task dispatch authority changed during admission.")
+                workflow.verify_context(lease, find_agent(current_agent_id()))
+                root = workflow.repository_for(find_agent(current_agent_id()), lease)
+                reservation_id = hook_input.get("tool_use_id")
+                if not root or not isinstance(reservation_id, str) or not reservation_id:
+                    deny("Task reservation requires a repository and tool_use_id.")
+                if current_workspace_id(tool_input) != lease.get("workspace_id"):
+                    deny("Task-reserved Peer must stay in the pinned Lead workspace.")
+                try:
+                    # Native hooks validate a preview. The proxy's own guard is
+                    # the single durable admission point; hooks may run twice.
+                    admitting = os.environ.get("PASEO_ROOM_PROXY_GUARD") == "1"
+                    admission = registry if admitting else copy.deepcopy(registry)
+                    bound = next(item for item in admission["leases"].values() if item.get("lead_agent_id") == current_agent_id() and item.get("state") == "active")
+                    task = tasks.reserve(admission, bound, labels.get("task_id"), labels.get("task_revision"),
+                                         labels["assignment_id"], reservation_id, disposition == "engineer", root)
+                except workflow.WorkflowError as error:
+                    deny(str(error))
+                updated["initialPrompt"] += "\nDurable task scope and consumed prerequisite revisions: " + json.dumps(
+                    {"taskId": task["task_id"], "taskRevision": task["revision"], "scope": task["scope"],
+                     "write": task["write"], "consumedRevisions": task["consumed_revisions"]}, sort_keys=True)
+                if admitting:
+                    lease["revision"] = lease.get("revision", 1) + 1
 
     updated["labels"] = labels
     updated["settings"] = settings
@@ -898,6 +960,9 @@ def guard_nested_create_agent(
         return
 
     epoch = current_lead_work_epoch()
+    lease = managed_lease_for_target(lead_id=current_agent_id())
+    if lease and tasks.epoch_state(lease)["tasks"]:
+        deny("Task-reserved Peer creation must use the direct create_agent tool.")
     if tool_input.get("notifyOnFinish") is not True:
         deny("Nested Peer create_agent requires notifyOnFinish: true.")
     route = labels.get(ROUTE_LABEL)
@@ -924,7 +989,7 @@ def guard_nested_create_agent(
             deny(f"Lead create_agent requires {key}: {expected_value}.")
     if stack_profile == "budget" and labels.get(STACK_PROFILE_LABEL) != "budget":
         deny("Budget Lead create_agent requires stack_profile: budget.")
-    required_thinking = peer_route_thinking(route, stack_profile)
+    required_thinking = peer_route_thinking(route, stack_profile, settings)
     if required_thinking and settings.get("thinkingOptionId") != required_thinking:
         deny(f"Peer route {route} requires thinkingOptionId: {required_thinking}.")
     if provider.startswith("codex-peer/") and settings.get("modeId") != "full-access":
@@ -1017,8 +1082,13 @@ def guard_target_mutation(role: str, tool_name: str, tool_input: dict[str, Any])
         lease = managed_lease_for_target(lead_id=caller)
         if lease and labels.get(ROOM_KIND_LABEL) == MANAGED_ROOM_KIND and labels.get(WORK_EPOCH_LABEL) != str(lease.get("work_epoch")):
             deny("Peer mutation is fenced to the current Lead work epoch.")
+        if lease and tool_name == "send_agent_prompt":
+            try:
+                tasks.require_peer_current(lease, labels)
+            except workflow.WorkflowError as error:
+                deny(str(error))
         if tool_name == "update_agent" and isinstance(tool_input.get("labels"), dict):
-            for key in (ROLE_LABEL, PARENT_LABEL, ROOM_KIND_LABEL, WORK_EPOCH_LABEL, "assignment_id", "disposition", "write_mode"):
+            for key in (ROLE_LABEL, PARENT_LABEL, ROOM_KIND_LABEL, WORK_EPOCH_LABEL, "assignment_id", "callback_transport", "disposition", "write_mode", "task_id", "task_revision"):
                 if key in tool_input["labels"] and tool_input["labels"][key] != labels.get(key):
                     deny(f"Peer authority label {key} is proxy-owned.")
     if not owned:
@@ -1214,6 +1284,9 @@ def release_workspace_leases(hook_input: dict[str, Any]) -> None:
 def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
     raw_tool_name = hook_input.get("tool_name")
     tool_name = raw_tool_name if isinstance(raw_tool_name, str) else ""
+    if role == "watcher":
+        if paseo_tool_name(tool_name) not in {"list_agents", "list_workspaces", "list_room_attention", "list_room_observations"}:
+            deny("Watcher may use read-only room inspection tools only.")
     raw_tool_input = hook_input.get("tool_input")
     tool_input = raw_tool_input if isinstance(raw_tool_input, dict) else {}
 
@@ -1229,7 +1302,7 @@ def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
         return
     if role == "peer":
         deny("Peer cannot use Paseo orchestration tools.")
-    if role == "watcher" and paseo_name not in {"list_agents", "list_workspaces", "list_room_attention"}:
+    if role == "watcher" and paseo_name not in {"list_agents", "list_workspaces", "list_room_attention", "list_room_observations"}:
         deny("Watcher may use read-only room inspection tools only.")
     if paseo_name == "create_agent":
         guard_create_agent(role, hook_input, tool_input)
@@ -1239,7 +1312,51 @@ def handle_pre(role: str, hook_input: dict[str, Any]) -> None:
         guard_workspace_mutation(role, paseo_name, tool_input)
 
 
+def record_peer_brief(hook_input: dict[str, Any]) -> None:
+    """Observation evidence from a successful dispatch, not new assignment authority."""
+    arguments = hook_input.get("tool_input", {})
+    response = hook_input.get("tool_response")
+    if not isinstance(arguments, dict) or response_failed(response):
+        return
+    peer_id = recursive_find(response, "agentId")
+    peer = find_agent(peer_id) if isinstance(peer_id, str) else None
+    labels = peer.get("labels") if isinstance(peer, dict) else None
+    dispatched = arguments.get("labels", {})
+    prompt = arguments.get("initialPrompt")
+    if (not isinstance(labels, dict) or not isinstance(dispatched, dict) or not isinstance(prompt, str)
+        or labels.get("role") != "peer" or labels.get("paseo.parent-agent-id") != current_agent_id()
+        or not labels.get("assignment_id") or labels.get("assignment_id") != dispatched.get("assignment_id")):
+        return  # No usable live correlation: observer will report UNKNOWN.
+    with locked_leases() as registry:
+        lease = registry["leases"].get(peer.get("workspaceId"))
+        if (not isinstance(lease, dict) or lease.get("state") != "active"
+            or lease.get("decision_state") != "WORKING" or lease.get("lead_agent_id") != current_agent_id()
+            or labels.get("work_epoch") != str(lease.get("work_epoch"))):
+            return
+        briefs = lease.setdefault("peer_briefs", {})
+        if tasks.epoch_state(lease)["tasks"]:
+            tasks.bind_peer(lease, dispatched.get("task_id"), labels, peer_id)
+        if not isinstance(briefs, dict):
+            raise RuntimeError("Peer brief evidence is invalid")
+        if len(briefs) >= 64 and peer_id not in briefs:
+            oldest = min(briefs, key=lambda key: str(briefs[key].get("recorded_at", "")))
+            del briefs[oldest]  # Rolling evidence window; absence remains UNKNOWN.
+        digest = workflow.digest({"prompt": prompt})
+        existing = briefs.get(peer_id)
+        if isinstance(existing, dict) and existing.get("digest") == digest and existing.get("assignment_id") == labels["assignment_id"] and existing.get("work_epoch") == lease["work_epoch"]:
+            return
+        brief = {"assignment_id": labels["assignment_id"], "work_epoch": lease["work_epoch"],
+                 "digest": digest, "excerpt": prompt[:4000],
+                 "truncated": len(prompt) > 4000, "recorded_at": isoformat(utc_now())}
+        if briefs.get(peer_id) != brief:
+            briefs[peer_id] = brief
+            lease["revision"] += 1
+
+
 def handle_post(role: str, hook_input: dict[str, Any]) -> None:
+    if role == "lead" and paseo_tool_name(str(hook_input.get("tool_name", ""))) == "create_agent":
+        record_peer_brief(hook_input)
+        return
     if role != "supervisor":
         return
     raw_tool_name = hook_input.get("tool_name")

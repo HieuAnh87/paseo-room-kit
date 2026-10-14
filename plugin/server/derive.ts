@@ -73,6 +73,17 @@ export function deriveRooms(leases: Lease[], agents: AgentView[], workspaces: Wo
     if (lease.state === "active" && lease.openAsks.length > 0) {
       add(signals, "open-asks", "attention", `${lease.openAsks.length} question(s) are awaiting an answer.`);
     }
+    if (lease.state === "active") {
+      for (const ask of lease.openAsks.filter((ask) => ask.kind === "REOPEN_REQUEST")) {
+        add(signals, "reopen-resolution", "attention", ask.resolution
+          ? `Reopen request has ${ask.resolution.outcome}: ${ask.resolution.nextAction}`
+          : "A Peer challenged a premise; Lead disposition is still pending.", ask.senderAgentId);
+      }
+      for (const grant of lease.steering.filter((grant) => !["DELIVERED", "REJECTED", "CANCELLED"].includes(grant.state))) {
+        add(signals, "peer-steering", ["UNCERTAIN", "NOTICE_SENDING", "PEER_SENDING"].includes(grant.state) ? "critical" : "attention",
+          `Human Peer steering ${grant.grantId} is ${grant.state}; inspect delivery evidence before acting.`, grant.peerAgentId);
+      }
+    }
     for (const peer of peers) {
       if (lease.state !== "active") continue;
       const seat = asSeat(peer, peer.labels?.disposition === "reviewer" ? "Reviewer" : "Peer");
@@ -104,6 +115,7 @@ export function deriveRooms(leases: Lease[], agents: AgentView[], workspaces: Wo
       reportCount: lease.reportCount,
       candidatePresent: lease.candidatePresent,
       openAsks: lease.openAsks,
+      steering: lease.steering,
       signals,
     };
   }).sort((left, right) => {

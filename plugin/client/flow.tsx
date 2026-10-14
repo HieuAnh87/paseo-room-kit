@@ -59,8 +59,15 @@ export function FlowSurface({ theme, layout }: PluginSurfaceProps) {
           <View key={ask.id} style={styles.gap}>
             <Text style={styles.text}>Open ask {ask.id}: {ask.question}</Text>
             <Text style={styles.muted}>For {ask.recipientAgentId} · opened {ask.createdAt}</Text>
+            {ask.resolution ? <>
+              <Text style={styles.text}>{ask.resolution.outcome}: {ask.resolution.decision}</Text>
+              <Text style={styles.muted}>Next: {ask.resolution.nextAction}{ask.resolution.owner ? ` · owner ${ask.resolution.owner}` : ""}{ask.resolution.checkpoint ? ` · checkpoint ${ask.resolution.checkpoint}` : ""}</Text>
+            </> : null}
           </View>
         ))}
+        {room.steering.map((grant) => <Text key={grant.grantId} style={styles.muted}>
+          Human steering {grant.grantId}: {grant.state} · Peer {grant.peerAgentId}
+        </Text>)}
         {room.signals.map((signal, index) => (
           <Text key={`${signal.code}:${signal.seatId ?? "room"}:${index}`} style={signal.level === "critical" ? styles.signalDanger : styles.signal}>
             {signalLine(signal)}

@@ -171,7 +171,7 @@ printf 'PRESERVE host-only Paseo plugin settings when present\n'
 install_file "${repo_root}/config/paseo/orchestration-preferences.json" \
   "${target_home}/.paseo/orchestration-preferences.json" 644
 
-for role in supervisor lead peer; do
+for role in supervisor lead peer watcher; do
   install_file "${repo_root}/config/codex/${role}.config.toml.tmpl" \
     "${target_home}/.codex/${role}.config.toml" 644 render
 done
@@ -201,6 +201,8 @@ install_file "${repo_root}/bin/room_attention.py" \
   "${target_home}/.local/bin/room_attention.py" 644
 install_file "${repo_root}/bin/room_land.py" \
   "${target_home}/.local/bin/room_land.py" 644
+install_file "${repo_root}/bin/room_tasks.py" \
+  "${target_home}/.local/bin/room_tasks.py" 644
 install_file "${repo_root}/bin/paseo-room-deny" \
   "${target_home}/.local/share/paseo-room-bin/paseo" 755
 
@@ -208,12 +210,6 @@ apply_zsh_startup_fragments
 
 install_file "${repo_root}/config/opencode/paseo-peer.json" \
   "${target_home}/.config/opencode/paseo-peer.json" 600
-for role in supervisor lead; do
-  install_file "${repo_root}/config/opencode/paseo-${role}.json.tmpl" \
-    "${target_home}/.config/opencode/paseo-${role}.json" 600 render
-  install_file "${repo_root}/config/opencode/paseo-${role}.instructions.md.tmpl" \
-    "${target_home}/.config/opencode/paseo-${role}.instructions.md" 600 render
-done
 install_file "${repo_root}/protocols/WORKFLOW_PROTOCOL.md" \
   "${target_home}/.config/room-workflow/WORKFLOW_PROTOCOL.md" 644
 install_file "${repo_root}/protocols/DISSENT_PROTOCOL.md" \
@@ -224,7 +220,7 @@ install_if_missing "${repo_root}/templates/SUPERVISOR_NOTEBOOK.md" \
   "${target_home}/.config/room-workflow/SUPERVISOR_NOTEBOOK.md" 600
 
 if [[ "$mode" == "apply" ]] && command -v codex >/dev/null 2>&1; then
-  for role in supervisor lead peer; do
+  for role in supervisor lead peer watcher; do
     HOME="$target_home" "${target_home}/.local/bin/codex-room-sync" "$role"
   done
 fi

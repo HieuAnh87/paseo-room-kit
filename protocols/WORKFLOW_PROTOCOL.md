@@ -16,6 +16,10 @@ Four layers remain separate: Paseo identity/session/lifecycle; common proxy/guar
 
 An optional `.orchestration/workflow.json` defines version-1 task classes with explicit boolean `candidate`, `independent_review` and `lead_self_work` gates. It requires `.orchestration/workspace-protocol.md`, which records project-specific scope, owner-reserved decisions, ownership, review tactics and proof requirements. The protocol and policy bytes, Lead placement and persisted provider/model/settings are pinned to the binding. Drift blocks managed work until an explicit checkpoint and replacement. Missing policy preserves legacy behavior; it does not supply candidate review gates.
 
+New bindings carry `runtime_binding_version=2`. The pin normalizes persisted `config`/`settings` and effective `runtimeInfo`; missing provider/model/thinking/mode or conflicting configured/effective values fail closed. Stable settings and feature values are digest-bound; display metadata and runtime session IDs are excluded. This is persisted metadata validation, not model attestation.
+
+Unversioned runtime pins remain legacy v1 for their current epoch, including null pins. They are surfaced as `LEGACY_UNVERIFIED` in room attention and are never silently upgraded. Existing work/handback can close under the original v1 checks; opening another epoch requires v2. Human may release and bind afresh, or use owner-shell `rebind-runtime REQUEST.json` at a `HANDBACK_READY` checkpoint with all tasks settled, checks quiescent and descendants archived. Request fields are `agentId`, `expectedWorkEpoch`, `expectedRevision`, `runtimeBindingDigest`, and independent launch-verification `evidence`. Preview returns the exact proposed digest without writing; `--apply` rechecks that digest and CAS before changing only the runtime pin/revision with a history receipt. It does not accept work, alter candidate/report evidence, change parentage or reopen an epoch.
+
 `paseo-room-workflow init REPOSITORY` previews missing files; `--apply` creates only missing files. Human adapts tactics before binding. Lead starts with `inspect_work_context`, reads the full repository protocol, and chooses the smallest topology that satisfies those gates. Neutral briefs and evidence-backed reopen/dependency requests are expected. Tests verify established contracts rather than silently deciding new APIs.
 
 For candidate-gated work, `inspect_work_candidate` returns a digest of Git HEAD (including unborn HEAD), staged index and tracked/nonignored untracked file contents, deletions, modes and symlink targets. Pause writers during review. The snapshot does not commit or stage changes; ignored artifacts and submodules are outside this proof (submodules are rejected). Acceptance and accepted archive recheck the candidate. A changed candidate invalidates the review.
@@ -30,8 +34,8 @@ Supervisor creates a Lead with:
 
 - `role=lead`
 - `route=planning`
-- `lead_profile=stable|claude|budget`
-- `stack_profile=standard|budget`
+- `lead_profile=stable|claude`
+- `stack_profile=standard`
 - `room_kind=managed_slp`
 - `work_epoch=1`
 - `task_state=LEASED`
@@ -44,7 +48,7 @@ Lead creates a Peer with:
 
 - `role=peer`
 - `route=impl|impl_deep|search|ui|research|audit`
-- `stack_profile=standard|budget`
+- `stack_profile=standard`
 - `room_kind=managed_slp`
 - `work_epoch=<current Lead epoch>`
 - `task_state=ASSIGNED`
@@ -89,7 +93,7 @@ Then include:
 - counterevidence;
 - dissent fields when applicable.
 
-Paseo automatically notifies Lead when the Peer finishes, errors, or needs permission. Lead must not poll.
+The proxy requires a working finish notification transport before Peer dispatch: native scoped callbacks, or the trusted room-callback lifecycle plugin for newly labelled Peers. The relay sends ended-turn evidence once to the canonical Lead with reverse notification disabled. It never accepts work. Missing current handback yields NEEDS_LEAD_DECISION; uncertain send is not retried. Native permission notifications depend on daemon support; inspect permission attention through the explicit bounded path when needed. Lead must not poll. If the Peer cannot access its own identity, it may report `peerAgentId=null` rather than guess or probe. The owning Lead's `record_peer_report` can correlate only one matching durable post-create brief and active native Peer record, preserving assignment/epoch/workspace/parentage and recording the correlation method. Ambiguity or missing creation evidence returns `NEEDS_LEAD_DECISION`; incorrect non-null IDs are never repaired. This does not establish a cause for a missing callback or missing environment variable.
 
 If an expected Peer callback does not render, Lead may invoke `recover_peer_callbacks`
 once as a bounded recovery action. The proxy reads durable Paseo status and curated
@@ -97,7 +101,7 @@ activity, requires exact parent/workspace/current-epoch authority, persists the
 terminal handback plus an evidence digest in the active lease, and updates the
 Peer's display state. Repeated recovery reads the stored receipt instead of
 re-reading activity. This is an exception path, not a status loop or replacement
-for native callbacks.
+for the selected callback transport.
 
 After receiving the callback, Lead updates the Peer label to the reported terminal outcome. Lead then chooses:
 
@@ -169,6 +173,20 @@ Plugins and UI may visualize `list_slp_decisions` output or invoke these protect
 
 An independent Watcher may read the active agent/workspace lists and current room attention for any managed Lead. It has no decision, lifecycle, agent mutation, or engineering authority. Its hourly scheduled run reports observed signals only; it never infers acceptance, sends prompts, or changes a lease.
 
+## Human steering and communication evidence
+
+Human may authorize an exact Peer instruction from the owner shell using `authorize-peer-steering REQUEST.json --apply`. The request binds `leadAgentId`, `peerAgentId`, `assignmentId`, unique `grantId`, `humanInstruction`, exact `prompt` and current `expectedWorkEpoch`/`expectedRevision`. No agent tool can create a grant. A grant preserves the assignment's disposition/write mode and expires for execution when the room revision changes before its first reservation; cancel it and authorize a new grant. It does not transfer ownership, widen write scope or accept work.
+
+The bound Supervisor consumes the grant via `steer_room_peer`, or Human via `steer-peer REQUEST.json --apply`, with only Lead/grant IDs and current epoch/revision. The proxy durably reserves each delivery, informs Lead of the exact intervention first, then sends to Peer with completion routed to Lead. The generic Supervisor-to-Peer mutation guard remains closed. Delivery receipts prove transport only; the Peer report and Lead disposition must show any effect on work.
+
+Peer delivery requires the Lead-scoped upstream tool. It never falls back to an unscoped send, which loses native completion routing. An unavailable caller-scoped method is a rejected send, not a successful steering receipt; runtime compatibility must be checked before relying on this path.
+
+`UNCERTAIN`, `NOTICE_SENDING` and `PEER_SENDING` never retry automatically. Human inspects exact message evidence and uses owner-shell `resolve-peer-steering` with Lead/grant IDs, `resolution=DELIVERED|NOT_DELIVERED`, evidence and current epoch/revision. Resolving a notice as delivered permits an explicit subsequent send to Peer, without sending the notice twice. Human may cancel a not-yet-sent or notice-only grant with `resolution=CANCELLED`. These resolution operations send nothing. Pending steering blocks final handback and binding withdrawal.
+
+`REOPEN_REQUEST` reports create obligations under [the dissent protocol](DISSENT_PROTOCOL.md). Only Lead records their evidence-backed disposition through `resolve_peer_report`; unresolved and evidence-pending requests block handback, while explicit Human escalation remains in the final outcome. Changed-work disposition must match the final candidate, including legacy repositories without optional review gates.
+
+Lead, bound Supervisor and read-only Watcher may call `list_room_observations`; Human may use `observations --lead-id`. The view joins current-epoch reports to dispatch briefs by exact Peer/assignment/epoch, plus Lead handling and Human steering receipts, inside the existing lease. Successful guarded dispatch captures a digest and bounded brief excerpt; missing hook/response correlation is `UNKNOWN`. The newest 64 reports are ordered by recorded time; omitted counts and truncated handback/brief context are explicit. This is evidence for a task-relative audit, never a score of reasoning, code quality or acceptance. Ordinary handbacks with no explicit handling record stay `UNKNOWN`.
+
 ## Optional local Git land
 
 Human `ACCEPTED` does not authorize an automatic merge. The owner-shell `land-prepare` creates a read-only plan for an already accepted, clean, fully committed candidate in a managed room with candidate proof. `land-apply` requires a separate exact plan-digest approval and `--apply`. Before fast-forwarding a local target branch it rechecks authority epoch/revision, candidate/review evidence, source and target commit IDs, clean worktrees, and idle room writers; any drift requires a new plan. The target branch may be checked out in an explicitly named clean worktree. The operation does not commit, push, run a test command, or override a red gate. Archive after land if the same active lease is needed for the check. Manual Git processes outside managed rooms are cooperative writers and must stay quiescent during land.
@@ -179,10 +197,9 @@ Provider/model routing comes from `~/.paseo/orchestration-preferences.json`.
 
 - Codex/Claude Supervisor chooses `planning` with `lead_profile=stable` or `planning_claude` with `lead_profile=claude` at the start of a bounded objective. An explicit Human preference wins; otherwise the Supervisor selects from the approved routes, defaulting to `planning` when neither has a clear task advantage. Both use `stack_profile=standard`. The chosen provider/model/settings remain pinned to the Lead binding; changing them requires an explicit checkpoint and replacement.
 - One Lead owns one bounded objective or workstream in one workspace. Same-objective follow-ups use the work epoch protocol; unrelated objectives use separate isolated workspaces. Concurrent work in the same repository requires disjoint write scope and contracts, otherwise the Supervisor serializes it. The one-Lead-per-workspace guard is deterministic; the cross-workspace scope check is a Supervisor workflow rule, not a filesystem-enforced invariant.
-- The OpenCode DeepSeek budget Supervisor is a separate front door. It may create only `planning_budget` with `lead_profile=budget` and `stack_profile=budget`; other Supervisors may not create that Lead.
-- A budget Lead resolves every Peer category through its `*_budget` route. Non-UI routes use DeepSeek V4 Flash Max; `ui_budget` remains Gemini through agy.
 - Lead must declare the Peer `route` label. The role-aware MCP proxy checks the exact provider/model, propagates the stack profile, and normalizes required thinking.
-- Standard `impl`, `impl_deep`, and `search` use GPT-6 Luna Medium. Standard `audit` uses a fresh Claude Opus 5.5 High Reviewer in Plan Mode with `disposition=reviewer` and read-only scope. Budget Peer routes retain DeepSeek Max.
+- Standard `impl`, `impl_deep`, and `search` use GPT-6 Luna High (default), XHigh or Max. The guard preserves the selected supported level. Standard `audit` uses a fresh Claude Opus 5.5 High Reviewer in Plan Mode with `disposition=reviewer` and read-only scope.
+- Codex/Claude Leads offer High, XHigh (default) and Max thinking. Preserve the selected supported level and pin it for the work epoch.
 - Stock providers are invalid for internal Lead or Peer seats.
 - Room launchers shadow the direct Paseo CLI; internal orchestration must use the role-aware MCP proxy.
 
@@ -195,3 +212,9 @@ Use a Paseo-managed worktree for engineering objectives that may mutate a reposi
 ## Explicit binding withdrawal
 
 `paseo-room-workflow bindings` exposes canonical epoch/revision, including WORKING rooms. Human may `withdraw REQUEST.json --apply` after checkpointing and settling every unarchived descendant. The request requires `agentId`, `expectedWorkEpoch`, `expectedRevision` and `settlementEvidence`. Uncertain deliveries must first be resolved. Withdrawal releases authority; it neither archives runtime nor asserts acceptance. Rebinding the same released root Lead advances its epoch and pins new context, preserving history and preventing old assignment correlation from being reused.
+
+## Scoped tasks and check receipts
+
+For multiple Peer writers or prerequisite-sensitive work, define the optional task ledger before creating any Peer in that epoch. Use `inspect_work_tasks` for current epoch/revision, then `define_work_task` with objective, literal scope, write disposition, existing prerequisites and required repository recipes. Create each Peer with matching `task_id` and `task_revision` labels. Use scout disposition for inspection-only search/research. A ledger cannot be introduced around already-dispatched Peers.
+
+Only dispatch a prerequisite-ready task. After quiescing its Peer, run fixed repository recipes through `run_work_check`, inspect the candidate-bound receipts, and explicitly `settle_work_task` as ACCEPTED or CANCELLED with evidence. Idle/callback does not accept a task. Reopen failed prerequisites through `reopen_work_task`; hold descendant dispatch/acceptance and quiesce their existing writers without silently releasing scope. Final handback requires all current tasks settled. An interrupted RUNNING check requires owner inspection and owner-shell `resolve-check`; never retry uncertain execution or manufacture a passing receipt. These are dispatch/evidence contracts, not filesystem sandboxes or Human acceptance.

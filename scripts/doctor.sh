@@ -144,11 +144,9 @@ required = {
     "codex-lead",
     "claude-lead",
     "claude-reviewer",
-    "claude-watcher",
+    "codex-watcher",
     "codex-peer",
     "opencode-peer",
-    "opencode-supervisor",
-    "opencode-lead",
     "gemini-ui",
 }
 with open(sys.argv[1], encoding="utf-8") as handle:
@@ -204,8 +202,13 @@ esac
 python3 "${repo_root}/tests/test_portability.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_proxy_handback.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_workflow.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_native_binding.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_room_modes.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_room_callbacks.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_attention.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_land.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_tasks.py" || failures=$((failures + 1))
+python3 "${repo_root}/tests/test_codex_model_catalog.py" || failures=$((failures + 1))
 python3 "${repo_root}/tests/test_public_export.py" || failures=$((failures + 1))
 python3 -c 'import pathlib, sys; [compile(path.read_text(), str(path), "exec") for path in map(pathlib.Path, sys.argv[1:])]' \
   "${repo_root}/hooks/room-role-guard.py" \
@@ -216,6 +219,7 @@ python3 -c 'import pathlib, sys; [compile(path.read_text(), str(path), "exec") f
   "${repo_root}/bin/room_workflow.py" \
   "${repo_root}/bin/room_attention.py" \
   "${repo_root}/bin/room_land.py" \
+  "${repo_root}/bin/room_tasks.py" \
   "${repo_root}/scripts/render_template.py" \
   "${repo_root}/scripts/manage_zshrc.py" \
   "${repo_root}/scripts/export_public_kit.py" \
@@ -264,7 +268,7 @@ if [[ "$mode" == "--live" ]]; then
     "${repo_root}/bin/paseo-room-mcp" \
     "${target_home}/.local/bin/paseo-room-mcp" \
     "installed role proxy"
-  for asset in paseo-room-workflow room_workflow.py room_attention.py room_land.py; do
+  for asset in paseo-room-workflow room_workflow.py room_attention.py room_land.py room_tasks.py; do
     check_installed_copy \
       "${repo_root}/bin/${asset}" \
       "${target_home}/.local/bin/${asset}" \
@@ -293,12 +297,6 @@ if [[ "$mode" == "--live" ]]; then
         "${target_home}/.config/claude-room/${role}/${asset}" \
         "installed Claude ${role} ${asset}"
     done
-    for asset in json instructions.md; do
-      check_installed_render \
-        "${repo_root}/config/opencode/paseo-${role}.${asset}.tmpl" \
-        "${target_home}/.config/opencode/paseo-${role}.${asset}" \
-        "installed OpenCode ${role} ${asset}"
-    done
   done
   for role in peer watcher; do
     for asset in instructions.md settings.json mcp.json; do
@@ -308,7 +306,11 @@ if [[ "$mode" == "--live" ]]; then
         "installed Claude ${role} ${asset}"
     done
   done
-  for role in supervisor lead; do
+  check_installed_render \
+    "${repo_root}/config/codex/watcher.config.toml.tmpl" \
+    "${target_home}/.codex/watcher.config.toml" \
+    "installed Codex watcher template"
+  for role in supervisor lead watcher; do
     if rg -q '^\[mcp_servers\.paseo\]$' \
       "${target_home}/.codex-runtime/${role}/config.toml"; then
       pass "${role} role MCP present"

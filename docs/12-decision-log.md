@@ -214,3 +214,25 @@ catalog và settings của mọi Claude role; delegation trong managed room ph�
 Cho phép chọn High hoặc XHigh trên cả `codex-supervisor/gpt-6-sol` và
 `claude-supervisor/claude-opus-5-5`; XHigh vẫn là mặc định. Đây là lựa chọn
 thinking của chính Supervisor, không đổi mức XHigh đã pin cho Lead.
+
+## D27 — Codex Supervisor và Lead dùng GPT-6.1 Sol
+
+Ngày 30/09/2026, Human yêu cầu nâng Sol lên `gpt-6.1-sol`. Model mặc định
+của Codex Supervisor, Codex Lead và route `planning` được cập nhật cùng nhau.
+Supervisor tiếp tục cho chọn High hoặc XHigh, mặc định XHigh; Lead dùng XHigh.
+Khi model mới chưa có trong catalog bundled, `codex-room-sync` lấy catalog
+Codex đã refresh rồi tắt native multi-agent cho toàn bộ model như trước.
+
+## D26 — Retire budget topology and move Watcher to Luna (2026-10-13)
+
+Human retired the DeepSeek Supervisor → GLM Lead → DeepSeek Peer budget topology.
+Remove its launch providers and routing keys; old budget seats may not create new work.
+Standard research keeps its separate OpenCode Peer route. Room Watcher now uses
+`codex-watcher/gpt-6-luna` Medium with a read-only runtime and the existing daily
+01:00 Asia/Ho_Chi_Minh schedule. Independent candidate review remains Opus 5.5 High.
+
+## D28 — Native runtime binding v2 và explicit checkpoint (2026-10-14)
+
+Normalize native `config`/`runtimeInfo` thay vì pin null từ fields phẳng. Binding mới từ chối giá trị thiếu/mâu thuẫn và phát hiện drift settings/model/thinking/mode. Lease cũ giữ v1 trong epoch đang chạy, được đánh dấu unverified, không tự repin; epoch mới cần explicit Human checkpoint rebind hoặc release/bind. Rebind giữ nguyên proof và Human decision boundary.
+
+Peer thiếu self-ID được phép báo null để Lead correlate bằng canonical creation assignment duy nhất, có receipt. Không quy lỗi callback cho global MCP injection từ tương quan; dùng fixture offline trước và một automatic episode có tiêu chí fail rõ ràng sau đó.

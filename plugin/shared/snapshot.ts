@@ -24,6 +24,9 @@ const ask = z.object({
   senderAgentId: z.string(),
   recipientAgentId: z.string(),
   createdAt: z.string(),
+  kind: z.string().nullable(),
+  resolution: z.object({ outcome: z.string(), decision: z.string(), evidence: z.string(),
+    nextAction: z.string(), owner: z.string().nullable(), checkpoint: z.string().nullable() }).nullable(),
 });
 
 const room = z.object({
@@ -41,6 +44,7 @@ const room = z.object({
   reportCount: z.number().int().nonnegative(),
   candidatePresent: z.boolean(),
   openAsks: z.array(ask),
+  steering: z.array(z.object({ grantId: z.string(), peerAgentId: z.string(), state: z.string() })),
   signals: z.array(signal),
 });
 

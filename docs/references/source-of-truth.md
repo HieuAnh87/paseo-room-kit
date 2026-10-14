@@ -18,6 +18,7 @@
 | `~/.codex/config.toml` | baseline, MCP, trusted projects, plugins/features |
 | `~/.codex/supervisor.config.toml` | Supervisor role overlay |
 | `~/.codex/lead.config.toml` | Lead role overlay |
+| `~/.codex/watcher.config.toml` | read-only Luna Watcher role overlay |
 | `~/.codex/peer.config.toml` | Peer role overlay |
 | `~/.codex/model-instructions.md` | shared agent behavior/instructions |
 | `~/.codex/AGENTS.md` | shared Codex context |

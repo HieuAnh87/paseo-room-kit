@@ -8,6 +8,7 @@ import pathlib
 import re
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -42,6 +43,8 @@ class ManagedLifecycleTest(unittest.TestCase):
             "id": LEAD_ID,
             "workspaceId": WORKSPACE_ID,
             "provider": "codex-lead",
+            "config": {"model": "gpt-6.1-sol", "thinkingOptionId": "xhigh", "modeId": "full-access"},
+            "lastStatus": "idle",
             "labels": {
                 "role": "lead",
                 "route": "planning",
@@ -71,6 +74,7 @@ class ManagedLifecycleTest(unittest.TestCase):
         )
         self.activity_update_count = 7
         self.agent_status = "idle"
+        self.native_upstream_call = self.module.upstream_call
         self.module.upstream_call = self.upstream_call
 
     def tearDown(self) -> None:
@@ -98,6 +102,7 @@ class ManagedLifecycleTest(unittest.TestCase):
             "handback_epoch": 0,
             "revision": 1,
             "decision_state": "WORKING",
+            "runtime_binding_version": 2,
         }
 
     def write_lease(self, lease: dict | None = None) -> None:
@@ -522,6 +527,7 @@ class ManagedLifecycleTest(unittest.TestCase):
                     "provider": "codex-peer/gpt-5.6-luna",
                     "labels": {"route": "search"},
                     "initialPrompt": "Search only.",
+                    "notifyOnFinish": False,
                 },
             },
         )
@@ -537,7 +543,94 @@ class ManagedLifecycleTest(unittest.TestCase):
             LEAD_ID,
         )
         self.assertTrue(fallback["background"])
-        self.assertTrue(fallback["notifyOnFinish"])
+        self.assertFalse(fallback["notifyOnFinish"])
+
+    def test_callback_dispatch_rejects_missing_scoped_catalog_before_admission(self) -> None:
+        for name in ("create_agent", "send_agent_prompt"):
+            for result in ({"error": {"code": -32601, "message": "Method not found"}},
+                           {"result": {"tools": []}}, {"result": None}, None):
+                with self.subTest(name=name, result=result):
+                    self.module.upstream_call = mock.Mock(return_value=result)
+                    self.module.run_guard = mock.Mock(side_effect=AssertionError("must not reserve"))
+                    response = self.module.call_tool(LEAD_ID, "lead", 70, {
+                        "name": name, "arguments": {"notifyOnFinish": True},
+                    })
+                    self.assertTrue(response["result"]["isError"])
+                    self.assertIn("dispatch was not sent", self.text(response))
+                    self.module.run_guard.assert_not_called()
+                    self.module.upstream_call.assert_called_once()
+                    self.assertFalse(self.module.upstream_call.call_args.kwargs["allow_unscoped_fallback"])
+
+    def test_callback_fallback_never_posts_top_level_in_json_or_sse_transport(self) -> None:
+        self.module.upstream_call = self.native_upstream_call
+        for name in ("create_agent", "send_agent_prompt"):
+            for content_type in ("application/json", "text/event-stream"):
+                with self.subTest(name=name, content_type=content_type):
+                    error = {"jsonrpc": "2.0", "id": 71,
+                             "error": {"code": -32601, "message": "Method not found"}}
+                    body = json.dumps(error)
+                    if content_type == "text/event-stream":
+                        body = "data: " + body + "\n\n"
+                    http = mock.MagicMock()
+                    http.__enter__.return_value = http
+                    http.read.return_value = body.encode()
+                    http.headers = {"content-type": content_type}
+                    with mock.patch.object(self.module.urllib.request, "urlopen", return_value=http) as post:
+                        response = self.module.upstream_call(LEAD_ID, {
+                            "jsonrpc": "2.0", "id": 71, "method": "tools/call",
+                            "params": {"name": name, "arguments": {}},
+                        })
+                    self.assertTrue(response["result"]["isError"])
+                    self.assertIn("callerAgentId", self.text(response))
+                    self.assertEqual(post.call_count, 1)
+                    self.assertIn("callerAgentId=", post.call_args.args[0].full_url)
+
+    def test_unscoped_callback_gate_preserves_explicit_no_notification_and_owner_calls(self) -> None:
+        for name in ("create_agent", "send_agent_prompt"):
+            payload = {"id": 72, "method": "tools/call",
+                       "params": {"name": name, "arguments": {"notifyOnFinish": False}}}
+            self.assertIsNone(self.module.unscoped_callback_error(LEAD_ID, payload))
+            payload["params"]["arguments"] = {"notifyOnFinish": True}
+            self.assertIsNone(self.module.unscoped_callback_error("human", payload))
+            self.assertTrue(self.module.unscoped_callback_error(LEAD_ID, payload)["result"]["isError"])
+
+    def test_scoped_callback_dispatch_still_uses_native_caller_context(self) -> None:
+        calls = []
+        def native_upstream(agent_id, payload, *, agent_scoped=True, allow_unscoped_fallback=True):
+            calls.append((agent_id, agent_scoped, payload))
+            if payload["method"] == "tools/list":
+                return {"result": {"tools": [{"name": "create_agent"}]}}
+            return {"result": {"isError": False, "structuredContent": {"agentId": PEER_ID}}}
+        self.module.upstream_call = native_upstream
+        self.module.run_guard = lambda role, event, agent_id, name, arguments, tool_use_id, response=None: (True, None, arguments)
+        response = self.module.call_tool(LEAD_ID, "lead", 73, {
+            "name": "create_agent", "arguments": {"notifyOnFinish": True},
+        })
+        self.assertFalse(response["result"]["isError"])
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(agent_id == LEAD_ID and scoped for agent_id, scoped, _ in calls))
+
+    def test_callback_catalog_race_is_denied_without_top_level_dispatch(self) -> None:
+        calls, post_responses = [], []
+        def upstream(agent_id, payload, *, agent_scoped=True, allow_unscoped_fallback=True):
+            calls.append((agent_scoped, payload))
+            if payload["method"] == "tools/list":
+                return {"result": {"tools": [{"name": "create_agent"}]}}
+            return {"error": {"code": -32602, "message": "Tool not found: create_agent"}}
+        def guard(role, event, agent_id, name, arguments, tool_use_id, response=None):
+            if event == "PostToolUse":
+                post_responses.append(response)
+            return True, None, arguments
+        self.module.upstream_call = upstream
+        self.module.run_guard = guard
+        response = self.module.call_tool(LEAD_ID, "lead", 74, {
+            "name": "create_agent", "arguments": {"notifyOnFinish": True},
+        })
+        self.assertTrue(response["result"]["isError"])
+        self.assertIn("dispatch was not sent", self.text(response))
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(scoped for scoped, _ in calls))
+        self.assertEqual(post_responses, [response])
 
     def test_peer_callback_recovery_fails_closed_without_monotonic_activity_count(self) -> None:
         peer = {

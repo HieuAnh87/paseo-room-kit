@@ -70,9 +70,12 @@ def load_policy(root: pathlib.Path | None) -> dict[str, Any] | None:
         value = json.loads(raw)
     except (OSError, ValueError) as error:
         raise WorkflowError("Workflow policy is unreadable") from error
-    if not isinstance(value, dict) or set(value) != {"version", "task_classes"} or type(value["version"]) is not int or value["version"] != 1:
+    if not isinstance(value, dict) or not {"version", "task_classes"}.issubset(value) or set(value) - {"version", "task_classes", "checks"} or type(value["version"]) is not int or value["version"] != 1:
         raise WorkflowError("Workflow policy requires version=1 and task_classes")
     classes = value["task_classes"]
+    if "checks" in value:
+        from room_tasks import validate_recipes
+        validate_recipes(value["checks"])
     if not isinstance(classes, dict) or not classes:
         raise WorkflowError("Workflow task_classes must be a nonempty object")
     for name, gate in classes.items():
@@ -128,8 +131,71 @@ def lead_matches(lease: dict[str, Any], lead: dict[str, Any]) -> bool:
     return False
 
 
+RUNTIME_BINDING_VERSION = 2
+RUNTIME_FIELDS = ("provider", "model", "thinkingOptionId", "modeId")
+
+
+def legacy_runtime_binding(record: dict[str, Any]) -> dict[str, Any]:
+    """Exact v1 extractor, retained only for the current legacy epoch."""
+    return {key: record.get(key) for key in (*RUNTIME_FIELDS, "settings")}
+
+
 def runtime_binding(record: dict[str, Any]) -> dict[str, Any]:
-    return {key: record.get(key) for key in ("provider", "model", "settings", "thinkingOptionId", "modeId")}
+    """Normalize native persisted config and effective runtime without guessing.
+
+    Config and runtime may be absent during startup, but conflicting nonempty
+    values are never silently preferred. Opaque settings are hashed so a pin
+    does not copy provider credentials into the authority registry.
+    """
+    containers = [record]
+    for key in ("config", "settings", "runtimeInfo"):
+        value = record.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise WorkflowError(f"Lead runtime {key} must be an object")
+        if isinstance(value, dict):
+            containers.append(value)
+    binding = {}
+    for field in RUNTIME_FIELDS:
+        values = [item[field] for item in containers if item.get(field) is not None]
+        if not values or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise WorkflowError(f"Lead runtime {field} is missing or invalid; refusing an empty pin")
+        if len(set(values)) != 1:
+            raise WorkflowError(f"Lead configured/effective runtime {field} conflicts; checkpoint required")
+        binding[field] = values[0]
+    settings = {}
+    for key in ("config", "settings"):
+        value = record.get(key)
+        if isinstance(value, dict):
+            extra = {name: item for name, item in value.items() if name not in RUNTIME_FIELDS}
+            if extra:
+                settings[key] = extra
+    # Native records expose a feature array; retain only stable feature IDs and
+    # values, not labels, descriptions or other UI metadata.
+    features = record.get("features")
+    if isinstance(features, list):
+        feature_values = {}
+        for item in features:
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or "value" not in item or item["id"] in feature_values:
+                raise WorkflowError("Lead feature settings are invalid or ambiguous")
+            feature_values[item["id"]] = item["value"]
+        if feature_values:
+            settings["features"] = feature_values
+    elif features is not None:
+        raise WorkflowError("Lead native features must be an array")
+    binding["settings"] = {"digest": digest(settings)}
+    return binding
+
+
+def binding_version(lease: dict[str, Any]) -> int:
+    version = lease.get("runtime_binding_version", 1)
+    if type(version) is not int or version not in {1, RUNTIME_BINDING_VERSION}:
+        raise WorkflowError("Unsupported runtime binding version; checkpoint required")
+    return version
+
+
+def require_current_binding(lease: dict[str, Any]) -> None:
+    if binding_version(lease) != RUNTIME_BINDING_VERSION:
+        raise WorkflowError("Legacy runtime binding is unverified; Human checkpoint rebind required before a new epoch")
 
 
 def verify_context(lease: dict[str, Any], lead: dict[str, Any], *, pin: bool = False) -> tuple[pathlib.Path | None, dict[str, Any] | None, dict[str, bool]]:
@@ -140,13 +206,16 @@ def verify_context(lease: dict[str, Any], lead: dict[str, Any], *, pin: bool = F
     current = policy["digest"] if policy else None
     if "workflow_digest" in lease and lease["workflow_digest"] != current:
         raise WorkflowError("Repository protocol changed; checkpoint and explicitly replace the binding")
-    runtime = runtime_binding(lead)
+    version = binding_version(lease)
+    runtime = runtime_binding(lead) if version == RUNTIME_BINDING_VERSION else legacy_runtime_binding(lead)
     if "runtime_binding" in lease and lease["runtime_binding"] != runtime:
         raise WorkflowError("Lead provider/model/settings drifted; an explicit replacement is required")
     task_class = lease.get("task_class", "bounded")
     gate = task_gate(policy, task_class)
     if pin:
         lease.setdefault("workflow_digest", current)
+        # Preserve the old first-pin behavior for unpinned legacy leases, but
+        # never upgrade their extractor/version or replace an existing null pin.
         lease.setdefault("runtime_binding", runtime)
         if root:
             lease.setdefault("repository", str(root))

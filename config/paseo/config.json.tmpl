@@ -67,12 +67,12 @@
             "thinkingOptions": [
               {
                 "id": "high",
-                "label": "High"
+                "label": "High",
+                "isDefault": true
               },
               {
                 "id": "xhigh",
-                "label": "XHigh",
-                "isDefault": true
+                "label": "XHigh"
               }
             ]
           }
@@ -91,18 +91,18 @@
         ],
         "models": [
           {
-            "id": "gpt-6-sol",
-            "label": "GPT-6 Sol",
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
             "isDefault": true,
             "thinkingOptions": [
               {
                 "id": "high",
-                "label": "High"
+                "label": "High",
+                "isDefault": true
               },
               {
                 "id": "xhigh",
-                "label": "XHigh",
-                "isDefault": true
+                "label": "XHigh"
               }
             ]
           }
@@ -121,14 +121,22 @@
         ],
         "models": [
           {
-            "id": "gpt-6-sol",
-            "label": "GPT-6 Sol",
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
             "isDefault": true,
             "thinkingOptions": [
+              {
+                "id": "high",
+                "label": "High"
+              },
               {
                 "id": "xhigh",
                 "label": "XHigh",
                 "isDefault": true
+              },
+              {
+                "id": "max",
+                "label": "Max"
               }
             ]
           }
@@ -162,9 +170,17 @@
             "contextWindowMaxTokens": 1000000,
             "thinkingOptions": [
               {
+                "id": "high",
+                "label": "High"
+              },
+              {
                 "id": "xhigh",
                 "label": "XHigh",
                 "isDefault": true
+              },
+              {
+                "id": "max",
+                "label": "Max"
               }
             ]
           }
@@ -204,40 +220,6 @@
           }
         ]
       },
-      "claude-watcher": {
-        "paseoTools": {
-          "enabled": false
-        },
-        "extends": "claude",
-        "label": "Claude Room Watcher",
-        "description": "Independent read-only room attention scan using Sonnet 5",
-        "command": [
-          "{{HOME}}/.local/bin/claude-room",
-          "watcher"
-        ],
-        "env": {
-          "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"
-        },
-        "disallowedTools": [
-          "Agent",
-          "Task",
-          "Workflow"
-        ],
-        "models": [
-          {
-            "id": "claude-sonnet-5",
-            "label": "Sonnet 5",
-            "isDefault": true,
-            "thinkingOptions": [
-              {
-                "id": "medium",
-                "label": "Medium",
-                "isDefault": true
-              }
-            ]
-          }
-        ]
-      },
       "codex-peer": {
         "paseoTools": {
           "enabled": false
@@ -256,9 +238,36 @@
             "isDefault": true,
             "thinkingOptions": [
               {
-                "id": "medium",
-                "label": "Medium",
+                "id": "high",
+                "label": "High",
                 "isDefault": true
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
+              }
+            ]
+          },
+          {
+            "id": "gpt-6.1-sol",
+            "label": "GPT-6.1 Sol",
+            "thinkingOptions": [
+              {
+                "id": "high",
+                "label": "High",
+                "isDefault": true
+              },
+              {
+                "id": "xhigh",
+                "label": "XHigh"
+              },
+              {
+                "id": "max",
+                "label": "Max"
               }
             ]
           }
@@ -277,7 +286,7 @@
         "models": [
           {
             "id": "aibox/deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash · AI Box",
+            "label": "DeepSeek V4 Flash \u00b7 AI Box",
             "isDefault": true,
             "thinkingOptions": [
               {
@@ -289,59 +298,7 @@
           },
           {
             "id": "aibox/glm-5.2",
-            "label": "GLM 5.2 · AI Box",
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
-              }
-            ]
-          }
-        ]
-      },
-      "opencode-supervisor": {
-        "paseoTools": {
-          "enabled": false
-        },
-        "extends": "acp",
-        "label": "AI Box Supervisor · Budget",
-        "description": "Human-facing budget Supervisor using DeepSeek V4 Flash",
-        "command": [
-          "{{HOME}}/.local/bin/opencode-paseo-room",
-          "supervisor"
-        ],
-        "models": [
-          {
-            "id": "aibox/deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash · AI Box",
-            "isDefault": true,
-            "thinkingOptions": [
-              {
-                "id": "max",
-                "label": "Max",
-                "isDefault": true
-              }
-            ]
-          }
-        ]
-      },
-      "opencode-lead": {
-        "paseoTools": {
-          "enabled": false
-        },
-        "extends": "acp",
-        "label": "AI Box GLM Lead · Budget",
-        "description": "Budget engineering Lead using GLM 5.2",
-        "command": [
-          "{{HOME}}/.local/bin/opencode-paseo-room",
-          "lead"
-        ],
-        "models": [
-          {
-            "id": "aibox/glm-5.2",
-            "label": "GLM 5.2 · AI Box",
-            "isDefault": true,
+            "label": "GLM 5.2 \u00b7 AI Box",
             "thinkingOptions": [
               {
                 "id": "max",
@@ -357,7 +314,7 @@
           "enabled": false
         },
         "extends": "acp",
-        "label": "Gemini UI · Antigravity ACP",
+        "label": "Gemini UI \u00b7 Antigravity ACP",
         "description": "Gemini UI/design peer through the Antigravity ACP bridge",
         "params": {
           "supportsMcpServers": false
@@ -368,38 +325,69 @@
         "models": [
           {
             "id": "gemini-3.6-flash-medium",
-            "label": "Gemini 3.6 Flash · Medium",
+            "label": "Gemini 3.6 Flash \u00b7 Medium",
             "isDefault": true
           },
           {
             "id": "gemini-3.6-flash-low",
-            "label": "Gemini 3.6 Flash · Low"
+            "label": "Gemini 3.6 Flash \u00b7 Low"
           },
           {
             "id": "gemini-3.6-flash-high",
-            "label": "Gemini 3.6 Flash · High"
+            "label": "Gemini 3.6 Flash \u00b7 High"
           },
           {
             "id": "gemini-3.5-flash-medium",
-            "label": "Gemini 3.5 Flash · Medium"
+            "label": "Gemini 3.5 Flash \u00b7 Medium"
           },
           {
             "id": "gemini-3.5-flash-low",
-            "label": "Gemini 3.5 Flash · Low"
+            "label": "Gemini 3.5 Flash \u00b7 Low"
           },
           {
             "id": "gemini-3.5-flash-high",
-            "label": "Gemini 3.5 Flash · High"
+            "label": "Gemini 3.5 Flash \u00b7 High"
           },
           {
             "id": "gemini-3.1-pro-low",
-            "label": "Gemini 3.1 Pro · Low"
+            "label": "Gemini 3.1 Pro \u00b7 Low"
           },
           {
             "id": "gemini-3.1-pro-high",
-            "label": "Gemini 3.1 Pro · High"
+            "label": "Gemini 3.1 Pro \u00b7 High"
           }
         ]
+      },
+      "codex-watcher": {
+        "paseoTools": {
+          "enabled": false
+        },
+        "extends": "codex",
+        "label": "Codex Room Watcher",
+        "description": "Independent read-only room attention scan using GPT-6 Luna",
+        "command": [
+          "{{HOME}}/.local/bin/codex-room",
+          "watcher"
+        ],
+        "models": [
+          {
+            "id": "gpt-6-luna",
+            "label": "GPT-6 Luna",
+            "isDefault": true,
+            "thinkingOptions": [
+              {
+                "id": "medium",
+                "label": "Medium",
+                "isDefault": true
+              }
+            ]
+          }
+        ],
+        "params": {
+          "sandbox_mode": "read-only",
+          "approval_policy": "never",
+          "web_search": "disabled"
+        }
       }
     }
   },

@@ -1,0 +1,6 @@
+{
+  "id": "room-callback",
+  "name": "Room callback",
+  "description": "Assignment-fenced Peer completion notifications for room-kit L/LP/SLP",
+  "requirements": {"paseo": ">=0.11.2 <0.12.0"}
+}

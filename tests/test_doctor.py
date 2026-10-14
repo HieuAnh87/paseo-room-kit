@@ -23,6 +23,7 @@ class DoctorTest(unittest.TestCase):
         (self.home / ".codex-runtime/supervisor").mkdir(parents=True)
         (self.home / ".codex-runtime/lead").mkdir(parents=True)
         (self.home / ".codex-runtime/peer").mkdir(parents=True)
+        (self.home / ".codex-runtime/watcher").mkdir(parents=True)
         rendered_config = (
             (ROOT / "config/paseo/config.json.tmpl")
             .read_text(encoding="utf-8")
@@ -36,7 +37,7 @@ class DoctorTest(unittest.TestCase):
             rendered_config,
             encoding="utf-8",
         )
-        for role in ("supervisor", "lead"):
+        for role in ("supervisor", "lead", "watcher"):
             (self.home / f".codex-runtime/{role}/config.toml").write_text(
                 "[mcp_servers.paseo]\n", encoding="utf-8"
             )
@@ -49,6 +50,7 @@ class DoctorTest(unittest.TestCase):
             ("bin/room_workflow.py", ".local/bin/room_workflow.py"),
             ("bin/room_attention.py", ".local/bin/room_attention.py"),
             ("bin/room_land.py", ".local/bin/room_land.py"),
+            ("bin/room_tasks.py", ".local/bin/room_tasks.py"),
             ("hooks/room-role-guard.py", ".codex/hooks/room-role-guard.py"),
             ("hooks/test-room-role-guard.py", ".codex/hooks/test-room-role-guard.py"),
             (
@@ -69,11 +71,10 @@ class DoctorTest(unittest.TestCase):
                     ROOT / f"config/claude/{role}.{asset}.tmpl",
                     self.home / f".config/claude-room/{role}/{asset}",
                 )
-            for asset in ("json", "instructions.md"):
-                self._render(
-                    ROOT / f"config/opencode/paseo-{role}.{asset}.tmpl",
-                    self.home / f".config/opencode/paseo-{role}.{asset}",
-                )
+        self._render(
+            ROOT / "config/codex/watcher.config.toml.tmpl",
+            self.home / ".codex/watcher.config.toml",
+        )
         for role in ("peer", "watcher"):
             for asset in ("instructions.md", "settings.json", "mcp.json"):
                 self._render(
@@ -129,8 +130,8 @@ fi
         self,
         mode: str,
         *,
-        cli_version: str = "0.9.1",
-        status_json: str = '{"daemonVersion":"0.9.1"}',
+        cli_version: str = "0.11.2",
+        status_json: str = '{"daemonVersion":"0.11.2"}',
         role: str | None = None,
         wrapper_active: bool = False,
         wrapper_contents: bytes | None = None,
@@ -176,7 +177,7 @@ fi
     def test_preflight_requires_effective_cli_version_pin(self) -> None:
         result = self.run_doctor("--preflight")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Paseo CLI version matches pin 0.9.1", result.stdout)
+        self.assertIn("Paseo CLI version matches pin 0.11.2", result.stdout)
 
         result = self.run_doctor("--preflight", cli_version="0.7.9")
         self.assertNotEqual(result.returncode, 0)
@@ -185,10 +186,10 @@ fi
     def test_live_requires_parseable_matching_daemon_version(self) -> None:
         result = self.run_doctor(
             "--live",
-            status_json='{"connectedDaemon":"reachable","daemonVersion":"0.9.1"}',
+            status_json='{"connectedDaemon":"reachable","daemonVersion":"0.11.2"}',
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Paseo daemon version matches pin 0.9.1", result.stdout)
+        self.assertIn("Paseo daemon version matches pin 0.11.2", result.stdout)
 
         for status_json, message in (
             ("not-json", "invalid or missing string daemonVersion"),

@@ -106,6 +106,56 @@ test("malformed or mismatched registry fails closed", () => {
   assert.throws(() => parseLeases(value), /mismatch/);
 });
 
+test("reopen disposition and uncertain steering stay visible without acceptance", () => {
+  const value = fixture();
+  const lease = value.leases[workspaceId] as Record<string, unknown>;
+  lease.room_asks = {
+    reopen: { ask_id: "reopen", kind: "REOPEN_REQUEST", status: "OPEN", work_epoch: 2,
+      question: "Reconsider foundation?", sender_agent_id: peerId, recipient_agent_id: leadId,
+      created_at: "2026-09-27T00:00:00Z", resolution: { outcome: "NEEDS_MORE_EVIDENCE",
+        decision: "Investigate lost ACK", evidence: "Failing regression", nextAction: "Run bounded experiment",
+        owner: peerId, checkpoint: "After regression runs" } },
+  };
+  lease.peer_steering = {
+    current: { peer_agent_id: peerId, work_epoch: 2, state: "UNCERTAIN" },
+    old: { peer_agent_id: peerId, work_epoch: 1, state: "UNCERTAIN" },
+  };
+  const [room] = deriveRooms(parseLeases(value), agents, workspaces);
+  assert.equal(room.openAsks[0]?.resolution?.owner, peerId);
+  assert.deepEqual(room.steering.map((grant) => grant.grantId), ["current"]);
+  assert.ok(room.signals.some((signal) => signal.code === "reopen-resolution"));
+  assert.equal(room.signals.find((signal) => signal.code === "peer-steering")?.level, "critical");
+  assert.equal(room.humanDecision, null);
+  assert.equal(room.decisionState, "WORKING");
+});
+
+test("legacy reopen remains actionable but closed requests and delivered steering do not", () => {
+  const value = fixture();
+  const lease = value.leases[workspaceId] as Record<string, unknown>;
+  lease.peer_reports = { legacy: { recorded_at: "2026-09-27T00:00:00Z", report: {
+    workEpoch: 2, kind: "REOPEN_REQUEST", peerAgentId: peerId, payload: { evidence: "Regression" },
+  } } };
+  let [room] = deriveRooms(parseLeases(value), agents, workspaces);
+  assert.ok(room.signals.some((signal) => signal.code === "reopen-resolution"));
+  lease.room_asks = { "peer:legacy": { ask_id: "peer:legacy", kind: "REOPEN_REQUEST", status: "ANSWERED", work_epoch: 2 } };
+  lease.peer_steering = { current: { peer_agent_id: peerId, work_epoch: 2, state: "DELIVERED" } };
+  [room] = deriveRooms(parseLeases(value), agents, workspaces);
+  assert.equal(room.openAsks.length, 0);
+  assert.ok(!room.signals.some((signal) => ["reopen-resolution", "peer-steering"].includes(signal.code)));
+});
+
+test("malformed pending decisions or steering states cannot become healthy signals", () => {
+  const value = fixture();
+  const lease = value.leases[workspaceId] as Record<string, unknown>;
+  lease.peer_steering = { bad: { peer_agent_id: peerId, work_epoch: 2, state: "ASSUMED_DELIVERED" } };
+  assert.throws(() => parseLeases(value), /steering receipt/);
+  delete lease.peer_steering;
+  lease.room_asks = { bad: { ask_id: "bad", status: "OPEN", work_epoch: 2,
+    question: "Question", sender_agent_id: peerId, recipient_agent_id: leadId, created_at: "2026-09-27T00:00:00Z",
+    resolution: { outcome: "RESOLVED_BY_LEAD" } } };
+  assert.throws(() => parseLeases(value), /resolution outcome/);
+});
+
 test("missing lease file is explicit; invalid JSON rejects", async () => {
   const dir = await mkdtemp(join(tmpdir(), "room-flow-test-"));
   try {

@@ -17,6 +17,7 @@ export type Lease = {
   reportPeerIds: Set<string>;
   reportCount: number;
   openAsks: Ask[];
+  steering: { grantId: string; peerAgentId: string; state: string }[];
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -38,6 +39,20 @@ function positiveInteger(value: unknown, field: string, fallback?: number): numb
     throw new Error(`Room lease has invalid ${field}`);
   }
   return found;
+}
+
+function pendingResolution(value: unknown, id: string): Ask["resolution"] {
+  if (value === undefined) return null;
+  const resolution = record(value);
+  if (!["NEEDS_MORE_EVIDENCE", "ESCALATED_TO_HUMAN"].includes(String(resolution.outcome))) {
+    throw new Error(`Invalid open ask resolution outcome: ${id}`);
+  }
+  for (const key of ["decision", "evidence", "nextAction", "owner", "checkpoint"] as const) {
+    if (typeof resolution[key] !== "string" || !resolution[key].trim()) throw new Error(`Invalid ask resolution ${key}: ${id}`);
+  }
+  return { outcome: resolution.outcome as string, decision: resolution.decision as string,
+    evidence: resolution.evidence as string, nextAction: resolution.nextAction as string,
+    owner: resolution.owner as string, checkpoint: resolution.checkpoint as string };
 }
 
 export function parseLeases(value: unknown): Lease[] {
@@ -88,9 +103,33 @@ export function parseLeases(value: unknown): Lease[] {
         senderAgentId: ask.sender_agent_id as string,
         recipientAgentId: ask.recipient_agent_id as string,
         createdAt: ask.created_at as string,
+        kind: optionalString(ask.kind, "ask kind"),
+        resolution: pendingResolution(ask.resolution, id),
       });
     }
+    // Old receipts still need disposition; this is a derived view, never a write.
+    for (const [reportId, value] of Object.entries(reports)) {
+      const receipt = record(value);
+      const report = record(receipt.report);
+      const id = `peer:${reportId}`;
+      if (report.workEpoch !== workEpoch || report.kind !== "REOPEN_REQUEST" || id in rawAsks) continue;
+      const payload = record(report.payload);
+      openAsks.push({ id, kind: "REOPEN_REQUEST", resolution: null,
+        question: optionalString(payload.question ?? payload.evidence, "report question") ?? "Reopen request needs Lead disposition",
+        senderAgentId: optionalString(report.peerAgentId, "report Peer") ?? "unknown",
+        recipientAgentId: optionalString(lease.lead_agent_id, "Lead") ?? "unknown",
+        createdAt: optionalString(receipt.recorded_at, "report timestamp") ?? "unknown" });
+    }
     openAsks.sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    const rawSteering = lease.peer_steering === undefined ? {} : record(lease.peer_steering);
+    const steering = Object.entries(rawSteering).flatMap(([grantId, value]) => {
+      const grant = record(value);
+      if (grant.work_epoch !== workEpoch) return [];
+      if (typeof grant.peer_agent_id !== "string" || !["AUTHORIZED", "NOTICE_SENDING", "NOTICE_DELIVERED", "PEER_SENDING", "DELIVERED", "REJECTED", "UNCERTAIN", "CANCELLED"].includes(String(grant.state))) {
+        throw new Error(`Invalid steering receipt: ${grantId}`);
+      }
+      return [{ grantId, peerAgentId: grant.peer_agent_id, state: grant.state as string }];
+    });
     return [{
       workspaceId,
       state,
@@ -105,6 +144,7 @@ export function parseLeases(value: unknown): Lease[] {
       reportPeerIds,
       reportCount,
       openAsks,
+      steering,
     }];
   });
 }

@@ -25,7 +25,7 @@ những provider này vẫn không nhận native unrestricted catalog.
 
 Selective authority được cấp lại có chủ đích:
 
-- `codex-supervisor`, `claude-supervisor`, `opencode-supervisor`, `codex-lead`, `claude-lead` và `opencode-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
+- `codex-supervisor`, `claude-supervisor`, `codex-lead`, `claude-lead` nhận MCP server `paseo` qua role-specific `paseo-room-mcp`;
 - proxy thử caller-scoped `/mcp/agents?callerAgentId=...`; khi per-provider
   policy làm catalog này rỗng/method-not-found, proxy dùng top-level catalog,
   khôi phục chỉ caller workspace/parent defaults, rồi role-filter và guard;

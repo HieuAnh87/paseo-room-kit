@@ -2,14 +2,14 @@
 
 ## Kết luận ngắn
 
-Setup hiện tại có topology Human-facing Supervisor → Lead → Peer, với provider custom tách vai trò. Standard stack dùng GPT-6 Luna Medium cho bounded Peer, Claude Opus 5.5 High cho Reviewer và Gemini cho UI; budget stack giữ DeepSeek/GLM.
+Task mới chọn L, LP (mặc định khi Human bind root Lead) hoặc SLP, với provider custom tách vai trò. Standard stack dùng GPT-6 Luna High/XHigh/Max cho bounded Peer, GPT-6.1 Sol cho `impl_deep` và Claude Opus 5.5 High cho Reviewer; route UI hiện dùng Codex Peer.
 
 Điểm quan trọng: topology được bảo vệ bằng provider/profile contract, role-aware Paseo MCP proxy, OpenCode permission, CLI wrapper và Lead lease registry. Codex lifecycle hooks chỉ còn là defense-in-depth vì `app-server` có specialized tool paths không phát hook. Đây là deterministic workflow isolation, không phải cryptographic isolation khỏi một process hostile có quyền đọc filesystem/process.
 
 ## Runtime snapshot
 
 Bảng dưới là snapshot lịch sử của lần kiểm kê trước. Pin Paseo hiện tại trong
-`versions.lock.json` là `0.9.1`; kiểm tra app/CLI/daemon live bằng doctor.
+`versions.lock.json` là `0.11.2`; kiểm tra app/CLI/daemon live bằng doctor.
 
 | Hạng mục | Giá trị tại thời điểm chụp |
 |---|---|
@@ -43,7 +43,7 @@ Supervisor <redacted-agent>
       │
       └── Lead <redacted-agent> (archived sau smoke)
           provider: codex-lead/gpt-5.6-sol
-          thinking: medium
+          thinking: high
           terminal status: closed
           cwd: ~/Documents/paseo-pilot
               │
@@ -59,15 +59,15 @@ Supervisor <redacted-agent>
 
 | Provider | Trạng thái/ý nghĩa |
 |---|---|
-| `claude-supervisor` | custom Human-facing Supervisor song song, Opus 5.5 High/XHigh (mặc định XHigh) |
-| `codex-supervisor` | custom Supervisor, GPT-6 Sol High/XHigh (mặc định XHigh) |
-| `codex-lead` | custom Lead, GPT-6 Sol XHigh |
-| `claude-lead` | custom Lead, Opus 5.5 XHigh với auto-compact window 300K |
-| `codex-peer` | custom bounded Codex Peer, GPT-6 Luna Medium |
+| `claude-supervisor` | custom Human-facing Supervisor song song, Opus 5.5 High/XHigh (mặc định High) |
+| `codex-supervisor` | custom Supervisor, GPT-6.1 Sol High/XHigh (mặc định High) |
+| `codex-lead` | custom Lead, GPT-6.1 Sol High/XHigh/Max (mặc định XHigh) |
+| `claude-lead` | custom Lead, Opus 5.5 High/XHigh/Max (mặc định XHigh), auto-compact window 300K |
+| `codex-peer` | custom bounded Codex Peer, GPT-6 Luna và GPT-6.1 Sol High/XHigh/Max (mặc định High) |
 | `claude-reviewer` | custom read-only Reviewer, Opus 5.5 High |
-| `claude-watcher` | custom independent Watcher, Sonnet 5 Medium |
-| `opencode-peer` | custom OpenCode ACP Peer, AI Box DeepSeek/GLM |
-| `gemini-ui` | custom ACP provider qua antigravity-acp, model catalog giới hạn về Gemini |
+| `codex-watcher` | custom independent Watcher, GPT-6 Luna Medium |
+| `opencode-peer` | adapter OpenCode ACP Peer, AI Box DeepSeek/GLM; hiện disabled |
+| `gemini-ui` | adapter ACP qua antigravity-acp, model catalog giới hạn về Gemini; hiện disabled |
 | `claude` | built-in Claude đang enabled cho direct/manual use; không phải internal role route |
 | stock `codex`/`opencode` | vẫn có thể xuất hiện trong daemon nhưng không được profile cho phép dùng để tạo Lead/Peer mới trong chain custom |
 | `omp`, `pi`, `copilot` | disabled trong config |

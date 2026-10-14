@@ -20,3 +20,24 @@ jobs:
         run: python3 tests/test_doctor.py
       - name: Validate installer behavior
         run: python3 tests/test_install.py
+  plugins:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: [plugin, callback-plugin]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+      - name: Install plugin dependencies
+        working-directory: ${{ matrix.directory }}
+        run: npm ci --ignore-scripts
+      - name: Test plugin
+        working-directory: ${{ matrix.directory }}
+        run: npm test
+      - name: Typecheck plugin
+        working-directory: ${{ matrix.directory }}
+        run: npm run typecheck

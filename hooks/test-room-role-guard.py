@@ -153,6 +153,29 @@ class RoomRoleGuardTest(unittest.TestCase):
             "deny",
         )
 
+    def test_lead_thinking_options_are_preserved_and_default_to_xhigh(self) -> None:
+        for profile, provider in (("stable", "codex-lead/gpt-6-sol"), ("claude", "claude-lead/claude-opus-5-5")):
+            for level in (None, "high", "xhigh", "max"):
+                with self.subTest(profile=profile, level=level):
+                    result = self.run_guard("supervisor", self.pre("mcp__paseo__create_agent", {
+                        "provider": provider, "workspaceId": f"workspace-{profile}-{level}",
+                        "title": "Lead", "initialPrompt": "Own the objective.",
+                        "labels": {"lead_profile": profile},
+                        "settings": {} if level is None else {"thinkingOptionId": level},
+                    }), self.supervisor_id)
+                    self.assertEqual(result["hookSpecificOutput"]["updatedInput"]["settings"]["thinkingOptionId"], level or "xhigh")
+
+    def test_lead_rejects_unsupported_thinking(self) -> None:
+        for profile, provider in (("stable", "codex-lead/gpt-6-sol"), ("claude", "claude-lead/claude-opus-5-5")):
+            for level in ("low", "medium", "ultra", "ultracode"):
+                with self.subTest(profile=profile, level=level):
+                    result = self.run_guard("supervisor", self.pre("mcp__paseo__create_agent", {
+                        "provider": provider, "workspaceId": f"workspace-{profile}-{level}",
+                        "title": "Lead", "initialPrompt": "Own the objective.",
+                        "labels": {"lead_profile": profile}, "settings": {"thinkingOptionId": level},
+                    }), self.supervisor_id)
+                    self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_supervisor_rewrites_valid_lead_and_reserves_lease(self) -> None:
         result = self.run_guard(
             "supervisor",
@@ -246,7 +269,15 @@ class RoomRoleGuardTest(unittest.TestCase):
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_budget_supervisor_rewrites_glm_lead_contract(self) -> None:
+    def test_watcher_denies_non_room_tools_and_allows_room_reads(self) -> None:
+        for tool in ("exec", "apply_patch", "Read", "mcp__other__read", "mcp__paseo__create_agent"):
+            result = self.run_guard("watcher", self.pre(tool, {}), self.supervisor_id)
+            self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny", tool)
+        for tool in ("list_agents", "list_workspaces", "list_room_attention", "list_room_observations"):
+            result = self.run_guard("watcher", self.pre("mcp__paseo__" + tool, {}), self.supervisor_id)
+            self.assertNotEqual((result or {}).get("hookSpecificOutput", {}).get("permissionDecision"), "deny", tool)
+
+    def test_retired_budget_supervisor_cannot_create_lead(self) -> None:
         self.write_agent(
             {
                 "id": self.supervisor_id,
@@ -269,13 +300,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             ),
             self.supervisor_id,
         )
-        updated = result["hookSpecificOutput"]["updatedInput"]
-        self.assertEqual(updated["labels"]["role"], "lead")
-        self.assertEqual(updated["labels"]["lead_profile"], "budget")
-        self.assertEqual(updated["labels"]["stack_profile"], "budget")
-        self.assertEqual(updated["settings"]["modeId"], "build")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
-        self.assertFalse(updated["notifyOnFinish"])
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_budget_supervisor_cannot_create_stable_lead(self) -> None:
         self.write_agent(
@@ -318,7 +343,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_lead_rewrites_search_thinking(self) -> None:
+    def test_lead_preserves_search_max_thinking(self) -> None:
         result = self.run_guard(
             "lead",
             self.pre(
@@ -338,7 +363,57 @@ class RoomRoleGuardTest(unittest.TestCase):
         self.assertEqual(updated["labels"]["task_state"], "ASSIGNED")
         self.assertEqual(updated["labels"]["room_kind"], "managed_slp")
         self.assertEqual(updated["labels"]["work_epoch"], "1")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "medium")
+        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
+
+    def test_codex_peer_thinking_choices_are_preserved_or_default_to_high(self) -> None:
+        for route in ("impl", "impl_deep", "search"):
+            for level in (None, "high", "xhigh", "max"):
+                with self.subTest(route=route, level=level):
+                    settings = {} if level is None else {"thinkingOptionId": level}
+                    result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {
+                        "provider": "codex-peer/gpt-6-luna", "title": "Peer",
+                        "initialPrompt": "Inspect the assigned scope.",
+                        "labels": {"route": route}, "settings": settings,
+                    }), self.lead_id)
+                    self.assertEqual(result["hookSpecificOutput"]["updatedInput"]["settings"]["thinkingOptionId"], level or "high")
+
+    def test_codex_peer_rejects_lower_or_unsupported_thinking(self) -> None:
+        for level in ("low", "medium", "ultra"):
+            with self.subTest(level=level):
+                result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {
+                    "provider": "codex-peer/gpt-6-luna", "title": "Peer",
+                    "initialPrompt": "Inspect the assigned scope.",
+                    "labels": {"route": "search"}, "settings": {"thinkingOptionId": level},
+                }), self.lead_id)
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_lead_post_dispatch_captures_exact_brief_once_and_bounds_context(self) -> None:
+        result = self.run_guard("lead", self.pre("mcp__paseo__create_agent", {
+            "provider": "codex-peer/gpt-6-luna", "title": "Search", "initialPrompt": "a" * 4100,
+            "labels": {"route": "search"},
+        }), self.lead_id)
+        dispatched = result["hookSpecificOutput"]["updatedInput"]
+        self.write_agent({"id": "peer-1", "workspaceId": "workspace-project",
+                          "labels": {**dispatched["labels"], "paseo.parent-agent-id": self.lead_id}})
+        post = {"hook_event_name": "PostToolUse", "tool_name": "mcp__paseo__create_agent",
+                "tool_input": dispatched, "tool_response": {"structuredContent": {"agentId": "peer-1"}}}
+        self.assertIsNone(self.run_guard("lead", post, self.lead_id))
+        lease = json.loads(self.leases.read_text())["leases"]["workspace-project"]
+        self.assertEqual(lease["peer_briefs"]["peer-1"]["assignment_id"], dispatched["labels"]["assignment_id"])
+        self.assertTrue(lease["peer_briefs"]["peer-1"]["truncated"])
+        self.assertEqual(len(lease["peer_briefs"]["peer-1"]["excerpt"]), 4000)
+        before = self.leases.read_bytes()
+        self.assertIsNone(self.run_guard("lead", post, self.lead_id))
+        self.assertEqual(self.leases.read_bytes(), before)
+
+    def test_lead_post_dispatch_does_not_invent_brief_for_failed_or_uncorrelated_create(self) -> None:
+        before = self.leases.read_bytes()
+        for response in ({"isError": True}, {"structuredContent": {"agentId": "missing-peer"}}):
+            post = {"hook_event_name": "PostToolUse", "tool_name": "mcp__paseo__create_agent",
+                    "tool_input": {"initialPrompt": "Search", "labels": {"assignment_id": "unknown"}},
+                    "tool_response": response}
+            self.assertIsNone(self.run_guard("lead", post, self.lead_id))
+        self.assertEqual(self.leases.read_bytes(), before)
 
     def test_lead_creates_read_only_claude_reviewer(self) -> None:
         result = self.run_guard(
@@ -386,7 +461,7 @@ class RoomRoleGuardTest(unittest.TestCase):
         )
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_budget_lead_routes_non_ui_to_deepseek_max(self) -> None:
+    def test_retired_budget_lead_cannot_dispatch_non_ui(self) -> None:
         self.write_agent(
             {
                 "id": self.lead_id,
@@ -434,12 +509,9 @@ class RoomRoleGuardTest(unittest.TestCase):
             ),
             self.lead_id,
         )
-        updated = result["hookSpecificOutput"]["updatedInput"]
-        self.assertEqual(updated["labels"]["stack_profile"], "budget")
-        self.assertEqual(updated["settings"]["thinkingOptionId"], "max")
-        self.assertEqual(updated["settings"]["modeId"], "build")
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_budget_lead_keeps_ui_on_gemini_agy(self) -> None:
+    def test_retired_budget_lead_cannot_dispatch_ui(self) -> None:
         self.write_agent(
             {
                 "id": self.lead_id,
@@ -487,9 +559,7 @@ class RoomRoleGuardTest(unittest.TestCase):
             ),
             self.lead_id,
         )
-        updated = result["hookSpecificOutput"]["updatedInput"]
-        self.assertEqual(updated["labels"]["stack_profile"], "budget")
-        self.assertNotIn("thinkingOptionId", updated["settings"])
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_peer_cannot_use_paseo(self) -> None:
         result = self.run_guard(
@@ -1173,7 +1243,7 @@ const r=await tools.mcp__paseo__create_agent({
   provider:"codex-peer/gpt-6-luna",
   notifyOnFinish:true,
   labels:{role:"peer",route:"search",task_state:"ASSIGNED",room_kind:"managed_slp",work_epoch:"1"},
-  settings:{thinkingOptionId:"medium"},
+  settings:{thinkingOptionId:"high"},
   initialPrompt:`Search only.`
 });text(r)
 """
@@ -1185,8 +1255,8 @@ const r=await tools.mcp__paseo__create_agent({
         self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
 
         valid = missing_mode.replace(
-            'settings:{thinkingOptionId:"medium"}',
-            'settings:{modeId:"full-access",thinkingOptionId:"medium"}',
+            'settings:{thinkingOptionId:"high"}',
+            'settings:{modeId:"full-access",thinkingOptionId:"high"}',
         )
         allowed = self.run_guard(
             "lead",

@@ -216,6 +216,8 @@ def _runtime_placeholder(value: str) -> bool:
     cleaned = value.strip()
     if _placeholder(cleaned):
         return True
+    if cleaned == "uuid.uuid4().hex":
+        return True
     if "{" in cleaned and "}" in cleaned:
         return True
     if re.fullmatch(
@@ -225,7 +227,7 @@ def _runtime_placeholder(value: str) -> bool:
         return True
     if re.fullmatch(
         r"[A-Za-z_][A-Za-z0-9_]*",
-        cleaned.rstrip(")"),
+        cleaned.rstrip(")}]"),
     ):
         return True
     normalized = cleaned.strip("\"'").lower()
