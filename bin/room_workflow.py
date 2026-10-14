@@ -18,6 +18,42 @@ class WorkflowError(ValueError):
     pass
 
 
+def callback_sending(lease: dict[str, Any]) -> bool:
+    return any(item.get("state") == "SENDING"
+               for item in lease.get("callback_deliveries", {}).values())
+
+
+def require_callback_idle(lease: dict[str, Any]) -> None:
+    if callback_sending(lease):
+        raise WorkflowError("Callback send is in flight; reconcile its receipt before changing this lease")
+
+
+def protect_callback_fences(before: dict[str, Any], after: dict[str, Any],
+                            callback_write: tuple[str, str] | None = None) -> None:
+    """Both registry writers enforce the same per-lease transport reservation.
+
+    Network I/O holds no registry lock. Only the callback owner may finish its
+    reserved receipt; all other changes to that lease must wait. Other leases
+    remain writable. A crashed sender is reconciled under its process lock.
+    """
+    for workspace, old in before.items():
+        new = after.get(workspace)
+        if old == new:
+            continue
+        if callback_write is None or callback_write[0] != workspace or not isinstance(new, dict):
+            raise WorkflowError("Callback send fences this lease; mutation was not committed")
+        key = callback_write[1]
+        old_receipts, new_receipts = old.get("callback_deliveries", {}), new.get("callback_deliveries", {})
+        if (key not in old_receipts or key not in new_receipts
+                or old_receipts[key].get("state") != "SENDING"
+                or {k: v for k, v in old.items() if k not in {"revision", "callback_deliveries"}}
+                   != {k: v for k, v in new.items() if k not in {"revision", "callback_deliveries"}}
+                or {k: v for k, v in old_receipts.items() if k != key}
+                   != {k: v for k, v in new_receipts.items() if k != key}
+                or old_receipts[key].get("payload") != new_receipts[key].get("payload")):
+            raise WorkflowError("Callback completion cannot change authority or another receipt")
+
+
 def digest(value: Any) -> str:
     data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return "sha256:" + hashlib.sha256(data.encode()).hexdigest()
@@ -198,7 +234,9 @@ def require_current_binding(lease: dict[str, Any]) -> None:
         raise WorkflowError("Legacy runtime binding is unverified; Human checkpoint rebind required before a new epoch")
 
 
-def verify_context(lease: dict[str, Any], lead: dict[str, Any], *, pin: bool = False) -> tuple[pathlib.Path | None, dict[str, Any] | None, dict[str, bool]]:
+def verify_context(lease: dict[str, Any], lead: dict[str, Any], *, pin: bool = False, callback_service: bool = False) -> tuple[pathlib.Path | None, dict[str, Any] | None, dict[str, bool]]:
+    if not callback_service:
+        require_callback_idle(lease)
     if not lead_matches(lease, lead):
         raise WorkflowError("Lead identity, placement or parentage differs from its authority binding")
     root = repository_for(lead, lease)
