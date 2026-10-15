@@ -1,0 +1,7 @@
+{
+  "name": "room-model-effort-preview",
+  "private": true,
+  "type": "module",
+  "scripts": {"start":"node serve.mjs", "build":"node build.mjs"},
+  "dependencies": {"esbuild":"0.28.2", "react":"19.1.0", "react-dom":"19.1.0", "react-native-web":"0.21.2"}
+}

@@ -57,3 +57,7 @@ instead of presenting a misleading empty or partial view.
 
 Source changes require `npm run typecheck` followed by
 `paseo plugin reload room-flow` on a host where it is already installed.
+
+## Model & effort preview
+
+The `Models · preview` source surface demonstrates role-scoped model/effort editing with an in-memory draft. It does not persist launch policy or mutate agents. See `../preview/model-effort/README.md` for the standalone browser harness and `../docs/research/model-effort-ui.md` for references. This preview does not migrate the incumbent Room Flow plugin's Paseo 0.9.x API or establish installed Paseo 0.11.2 compatibility.

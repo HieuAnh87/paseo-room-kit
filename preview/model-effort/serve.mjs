@@ -1,0 +1,10 @@
+import {createServer} from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {dirname,join} from 'node:path';
+import {buildPreview} from './build.mjs';
+const root=dirname(fileURLToPath(import.meta.url));
+await buildPreview();
+const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Room Flow — Model & effort preview</title><style>html,body,#root{margin:0;height:100%;display:flex;flex-direction:column}*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input{font:inherit}input{caret-color:#788adf}::selection{background:#a5b4fc;color:#151624}*:focus-visible{outline:2px solid #788adf;outline-offset:3px}html{color-scheme:dark}html:has(body.light){color-scheme:light}::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#7f808966;border-radius:4px}::-webkit-scrollbar-track{background:transparent}</style></head><body><div id="root"></div><script>if(new URLSearchParams(location.search).get('theme')==='light')document.body.classList.add('light')</script><script src="/app.js"></script></body></html>`;
+const server=createServer(async(req,res)=>{try{const path=new URL(req.url,'http://localhost').pathname;if(path==='/app.js'){res.setHeader('content-type','application/javascript');res.end(await readFile(join(root,'dist/app.js')));}else if(path==='/'){res.setHeader('content-type','text/html; charset=utf-8');res.end(html);}else{res.statusCode=404;res.end('Not found');}}catch{res.statusCode=500;res.end('Preview unavailable');}});
+server.listen(Number(process.env.MODEL_PREVIEW_PORT||4318),'127.0.0.1',()=>console.log('Model preview: http://127.0.0.1:4318/'));
