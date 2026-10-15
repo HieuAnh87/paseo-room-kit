@@ -1,6 +1,7 @@
 # Room Flow plugin
 
-Optional, read-only Paseo 0.9.x sidebar view for managed `paseo-room-kit` rooms.
+Optional, read-only Paseo 0.11.2 sidebar view for managed `paseo-room-kit` rooms,
+with a separate Model & effort preview screen.
 It joins the daemon's paged workspace and agent directory with the kit's
 existing `lead-leases.json`. The lease remains the source of room authority;
 Paseo remains the source of session status. The plugin creates no lane ledger,
@@ -16,7 +17,7 @@ default and can be expanded.
 
 ## Requirements and local checks
 
-- Paseo daemon **and app** version `>=0.9.0 <0.10.0`.
+- Paseo daemon **and app** version `>=0.11.2 <0.12.0`.
 - Node.js 22 or later for the local test command.
 - The room-kit lease registry on the same machine as the daemon. The path is
   `ROOM_GUARD_LEASES_PATH`, then `PASEO_ROOM_LEASES_PATH`, then
@@ -30,7 +31,7 @@ npm run typecheck
 npm test
 ```
 
-`@getpaseo/plugin` is a development dependency pinned to 0.9.0 for checking
+`@getpaseo/plugin` is a development dependency pinned to 0.11.2 for checking
 the API. Paseo supplies SDK, React, React Native and Zod host modules at
 runtime. The plugin uses no external service.
 
@@ -40,7 +41,7 @@ Paseo plugins are trusted code. Its backend runs with the daemon user's file
 access, and the client surface runs inside the app. Review this directory
 before installing. The kit installer does not install or enable this plugin.
 
-When using a matching Paseo 0.9.x CLI, daemon and app, check that the daemon's
+When using a matching Paseo 0.11.2 CLI, daemon and app, check that the daemon's
 global plugin switch is already enabled. If it is not, get the machine owner's
 authorization before enabling it. Then install this directory as an absolute
 path on the daemon host:
@@ -57,3 +58,20 @@ instead of presenting a misleading empty or partial view.
 
 Source changes require `npm run typecheck` followed by
 `paseo plugin reload room-flow` on a host where it is already installed.
+
+## Model & effort preview
+
+Open **Model & effort** beside **Room Flow** in the Paseo sidebar. This separate
+screen offers Lead, Peer, UI specialist and Advisor roles, model search,
+supported effort choices, and a before/after draft review. Its catalog is a
+captured snapshot, not a live provider query.
+
+**Save preview** updates component memory only. It does not persist launch
+policy or mutate agents; leaving the screen or reloading resets the draft.
+The confirmation explicitly says settings are not applied to agents.
+
+The plugin uses Paseo 0.11.2 screen and sidebar registrations. See
+`../preview/model-effort/README.md` for the standalone browser harness,
+`../docs/research/model-effort-ui.md` for references, and
+`../docs/research/model-effort-preview-checks.md` for the browser and installed
+desktop verification boundaries.
