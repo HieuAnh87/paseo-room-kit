@@ -1,26 +1,44 @@
-import type { PluginClientContext } from "@getpaseo/plugin/client";
+import type { PluginClientContext, PluginSidebarItemProps } from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 import { FlowSurface } from "./client/flow.tsx";
 import { ModelsPreviewSurface } from "./client/models-preview.tsx";
 
+function RoomFlowSidebar({ currentScreen, openScreen }: PluginSidebarItemProps) {
+  return (
+    <>
+      <SidebarRow
+        id="overview"
+        icon="Activity"
+        label="Room Flow"
+        active={currentScreen?.screenId === "room-flow"}
+        onPress={() => openScreen({ screenId: "room-flow" })}
+      />
+      <SidebarRow
+        id="models"
+        icon="SlidersHorizontal"
+        label="Model & effort"
+        active={currentScreen?.screenId === "model-effort-preview"}
+        onPress={() => openScreen({ screenId: "model-effort-preview" })}
+      />
+    </>
+  );
+}
+
 export default function contribute(client: PluginClientContext) {
-  const removeSurface = client.addSurface("room-flow", FlowSurface);
-  const removeSidebar = client.addSidebarItem({
+  const removeFlow = client.addScreen({ id: "room-flow", title: "Room Flow", Component: FlowSurface });
+  const removeModels = client.addScreen({
+    id: "model-effort-preview",
+    title: "Room Flow · Model & effort",
+    Component: ModelsPreviewSurface,
+  });
+  const removeSidebar = client.addSidebarHeaderItem({
     id: "room-flow",
     title: "Room Flow",
-    icon: "Activity",
-    surface: "room-flow",
-  });
-  const removeModels = client.addSurface("model-effort-preview", ModelsPreviewSurface);
-  const removeModelsItem = client.addSidebarItem({
-    id: "model-effort-preview",
-    title: "Models · preview",
-    icon: "SlidersHorizontal",
-    surface: "model-effort-preview",
+    Component: RoomFlowSidebar,
   });
   return () => {
-    removeModelsItem();
-    removeModels();
     removeSidebar();
-    removeSurface();
+    removeModels();
+    removeFlow();
   };
 }

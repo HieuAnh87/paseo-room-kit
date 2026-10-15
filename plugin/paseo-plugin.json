@@ -1,5 +1,8 @@
 {
   "id": "room-flow",
-  "description": "Read-only Flow and Health view for Paseo room-kit managed rooms",
-  "requirements": { "paseo": ">=0.9.0 <0.10.0" }
+  "description": "Room monitoring and a role-based model and effort preview",
+  "requirements": {
+    "paseo": ">=0.11.2 <0.12.0"
+  },
+  "name": "Room Flow"
 }
