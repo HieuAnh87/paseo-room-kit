@@ -153,6 +153,15 @@ class RoomRoleGuardTest(unittest.TestCase):
             "deny",
         )
 
+    def test_callback_send_fences_lead_runtime_mutation(self) -> None:
+        registry = json.loads(self.leases.read_text())
+        registry['leases']['workspace-project']['callback_deliveries'] = {'message': {'state': 'SENDING'}}
+        self.leases.write_text(json.dumps(registry))
+        result = self.run_guard('lead', self.pre('mcp__paseo__update_agent',
+            {'agentId': self.lead_id, 'settings': {'model': 'another-model'}}), self.lead_id)
+        self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+        self.assertIn('in flight', result['hookSpecificOutput']['permissionDecisionReason'])
+
     def test_lead_thinking_options_are_preserved_and_default_to_xhigh(self) -> None:
         for profile, provider in (("stable", "codex-lead/gpt-6-sol"), ("claude", "claude-lead/claude-opus-5-5")):
             for level in (None, "high", "xhigh", "max"):

@@ -212,6 +212,24 @@ class ManagedLifecycleTest(unittest.TestCase):
         self.assertTrue(result["result"]["isError"])
         self.assertIn("stale", self.text(result))
 
+    def test_room_prompts_pin_active_turn_behavior(self) -> None:
+        ready = self.deliver_handback()
+        self.module.reopen_work_epoch(SUPERVISOR_ID, "supervisor", 5, {
+            "agentId": LEAD_ID, "prompt": "Bounded follow-up.",
+            "expectedWorkEpoch": 1, "expectedRevision": ready["revision"],
+        })
+        handback, reopen = [a for _, name, a in self.calls if name == "send_agent_prompt"]
+        self.assertEqual((handback["agentId"], handback["activeTurnBehavior"]), (SUPERVISOR_ID, "steer"))
+        self.assertEqual((reopen["agentId"], reopen["activeTurnBehavior"]), (LEAD_ID, "steer"))
+
+    def test_lead_recovery_interrupts_the_stalled_turn(self) -> None:
+        result = self.module.recover_working_lead(
+            SUPERVISOR_ID, "supervisor", 6, {"agentId": LEAD_ID, "prompt": "Resume."}
+        )
+        self.assertFalse(result["result"]["isError"], result)
+        [recovery] = [a for _, name, a in self.calls if name == "send_agent_prompt"]
+        self.assertEqual(recovery["activeTurnBehavior"], "interrupt")
+
     def test_accept_and_abandon_are_digest_bound_and_one_shot(self) -> None:
         for decision in ("ACCEPTED", "ABANDONED"):
             with self.subTest(decision=decision):

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import datetime as dt
 import fcntl
 import hashlib
@@ -683,7 +684,7 @@ def validate_lease_entry(workspace_id: Any, lease: Any) -> dict[str, Any]:
 
 
 @contextlib.contextmanager
-def locked_leases():
+def locked_leases(*, callback_write: tuple[str, str] | None = None):
     LEASES_PATH.parent.mkdir(parents=True, exist_ok=True)
     lock_path = LEASES_PATH.with_suffix(LEASES_PATH.suffix + ".lock")
     with lock_path.open("a+") as lock_stream:
@@ -712,7 +713,10 @@ def locked_leases():
                     lease.setdefault("legacy_epoch_unknown", True)
             for lease in value["leases"].values():
                 normalize_lease_revision(lease)
+            fenced = {key: copy.deepcopy(lease) for key, lease in value["leases"].items()
+                      if workflow.callback_sending(lease)}
             yield value
+            workflow.protect_callback_fences(fenced, value["leases"], callback_write)
             write_json_atomic(LEASES_PATH, value)
         finally:
             fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
@@ -793,6 +797,7 @@ def bind_root_lead(lead_id: str, supervisor_id: str | None, task_class: str, *, 
              "task_class": task_class, "work_epoch": 1, "handback_epoch": 0,
              "execution_mode": mode,
              "revision": 1, "decision_state": "WORKING", "bound_by": "human",
+             "callback_outbox_version": 2,
              "runtime_binding_version": workflow.RUNTIME_BINDING_VERSION}
     _, _, gate = workflow.verify_context(lease, prospective, pin=True)
     if mode == "L" and (not gate["lead_self_work"] or gate["independent_review"]):
@@ -892,6 +897,7 @@ def withdraw_binding(arguments: dict[str, Any], *, apply: bool = False) -> dict[
         lease = lead_lease(registry, arguments["agentId"])
         if not lease or not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
             raise workflow.WorkflowError("Withdrawal has a stale authority binding")
+        workflow.require_callback_idle(lease)
         if lease.get("decision_state") not in {"WORKING", "HANDBACK_READY"}:
             raise workflow.WorkflowError("Resolve uncertain delivery before withdrawing authority")
         if pending_steering(lease):
@@ -1451,7 +1457,8 @@ def steer_room_peer(agent_id: str, role: str, request_id: Any, arguments: dict[s
             delivery_actor = lead_id if stage == "PEER" else agent_id
             response = upstream_call(delivery_actor, {"jsonrpc": "2.0", "id": correlation, "method": "tools/call",
                 "params": {"name": "send_agent_prompt", "arguments": {"agentId": target, "prompt": prompt,
-                           "background": True, "notifyOnFinish": stage == "PEER"}}},
+                           "background": True, "notifyOnFinish": stage == "PEER",
+                           "activeTurnBehavior": "steer"}}},
                 agent_scoped=stage == "PEER" or role != "human", allow_unscoped_fallback=stage != "PEER")
             status = delivery_response_status(response)
             if isinstance(response, dict) and response.get("id") != correlation:
@@ -1547,7 +1554,7 @@ def _attention_authority(
             or not watcher_provider(watcher)
         ):
             return None
-    workflow.verify_context(lease, lead, pin=False)
+    workflow.verify_context(lease, lead, pin=False, callback_service=not require_working)
     return lease, lead
 
 
@@ -1653,7 +1660,7 @@ def list_room_attention(
         asks.sort(key=lambda item: (item["created_at"], item["ask_id"]))
         result = {"work_epoch": epoch, "revision": lease["revision"], "asks": asks,
                   "execution_mode": lease.get("execution_mode"),
-                  "callback_attention": [dict(item, escalate_to="human" if item.get("state") == "UNCERTAIN" else "lead")
+                  "callback_attention": [dict({k: v for k, v in item.items() if k != "payload"}, escalate_to="human" if item.get("state") in {"UNCERTAIN", "SENDING"} else "lead")
                       for item in lease.get("callback_deliveries", {}).values()
                       if item.get("work_epoch") == epoch and (item.get("state") != "DELIVERED" or item.get("outcome") == "NEEDS_LEAD_DECISION")],
                   "runtime_binding_status": "VERIFIED_V2" if workflow.binding_version(lease) == 2 and lease.get("runtime_binding") else "LEGACY_UNVERIFIED"}
@@ -2196,6 +2203,7 @@ def handback_to_parent(
                         "prompt": f"Final Lead handback (work epoch {epoch}, candidate {candidate_digest or 'legacy-unbound'}):\n\n{message.strip()}",
                         "background": True,
                         "notifyOnFinish": False,
+                        "activeTurnBehavior": "steer",
                     },
                 },
             },
@@ -2312,6 +2320,8 @@ def list_slp_decisions(
     with locked_leases() as registry:
         for workspace_id, lease in registry["leases"].items():
             if not isinstance(lease, dict) or lease.get("state") != "active":
+                continue
+            if workflow.callback_sending(lease):
                 continue
             if lease.get("room_kind") != "managed_slp":
                 continue
@@ -2500,6 +2510,7 @@ def reopen_work_epoch(
                     "prompt": prompt.strip(),
                     "background": True,
                     "notifyOnFinish": False,
+                    "activeTurnBehavior": "steer",
                 },
             },
             },
@@ -3000,11 +3011,11 @@ def callback_owner(registry: dict[str, Any], peer_id: str) -> tuple[dict[str, An
             or brief.get("work_epoch") != lease["work_epoch"]):
         return None
     workflow.require_current_binding(lease)
-    workflow.verify_context(lease, lead, pin=True)
+    workflow.verify_context(lease, lead, pin=True, callback_service=True)
     return lease, lead, peer
 
 
-def relay_room_callback(peer_id: str) -> dict[str, Any]:
+def legacy_relay_room_callback(peer_id: str) -> dict[str, Any]:
     """Deliver a real ended-turn report once, fenced by the canonical assignment.
 
     A crash after reservation is UNCERTAIN, not permission to send again. This
@@ -3069,7 +3080,7 @@ def relay_room_callback(peer_id: str) -> dict[str, Any]:
             response = upstream_call("human", {
                 "jsonrpc": "2.0", "id": "relay-delivery", "method": "tools/call",
                 "params": {"name": "send_agent_prompt", "arguments": {
-                    "agentId": lead_id, "background": True, "notifyOnFinish": False,
+                    "agentId": lead_id, "background": True, "notifyOnFinish": False, "activeTurnBehavior": "steer",
                     "prompt": f"[Room callback relay]\nPeer: {peer_id}\nAssignment: {assignment}\nWork epoch: {epoch}\nTransport receipt only; review and settle explicitly.\n\n{message}",
                 }},
             }, agent_scoped=False)
@@ -3083,10 +3094,178 @@ def relay_room_callback(peer_id: str) -> dict[str, Any]:
     return receipt
 
 
+
+@contextlib.contextmanager
+def callback_process_lock(peer_id: str):
+    """A process-lifetime lock; never delete lock files (inode identity matters)."""
+    if not AGENT_ID_PATTERN.fullmatch(peer_id):
+        raise workflow.WorkflowError("Invalid callback Peer identity")
+    directory = LEASES_PATH.parent / "callback-locks"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = directory / f"{peer_id}.lock"
+    fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "a+") as stream:
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
+def callback_payload(receipt: dict[str, Any], key: str) -> dict[str, Any]:
+    payload = receipt.get("payload")
+    if (receipt.get("version") != 2 or not isinstance(payload, dict)
+            or receipt.get("message_id") != key or payload.get("message_id") != key
+            or digest_payload(payload) != receipt.get("payload_digest")
+            or any(payload.get(field) != receipt.get(field) for field in
+                   ("agent_id", "recipient_id", "work_epoch", "assignment_id", "outcome"))
+            or not isinstance(payload.get("handback"), str)
+            or digest_payload(payload["handback"]) != receipt.get("evidence_digest")):
+        raise workflow.WorkflowError("Callback payload is invalid or changed; delivery blocked")
+    return payload
+
+
+def recover_interrupted_callback(peer_id: str) -> None:
+    # Caller holds the Peer process lock, proving no old sender is still active.
+    with locked_leases() as registry:
+        interrupted = [(workspace, key) for workspace, lease in registry["leases"].items()
+                       for key, item in lease.get("callback_deliveries", {}).items()
+                       if item.get("agent_id") == peer_id and item.get("state") == "SENDING"]
+    for workspace, key in interrupted:
+        with locked_leases(callback_write=(workspace, key)) as registry:
+            lease = registry["leases"][workspace]
+            item = lease["callback_deliveries"][key]
+            item.update(state="UNCERTAIN", completed_at=utc_timestamp(), reason="sender_interrupted")
+            bump_revision(lease)
+
+
+def deliver_callback_outbox(workspace: str, key: str) -> dict[str, Any]:
+    """Caller holds the Peer process lock. Send the immutable stored payload."""
+    with locked_leases() as registry:
+        lease = registry["leases"][workspace]
+        receipt = lease["callback_deliveries"][key]
+        if receipt["state"] != "READY":
+            return dict(receipt)
+        payload = callback_payload(receipt, key)
+        owner = callback_owner(registry, receipt["agent_id"])
+        if (not owner or owner[0]["workspace_id"] != workspace
+                or owner[0]["work_epoch"] != receipt["work_epoch"]
+                or owner[1]["id"] != receipt["recipient_id"]
+                or owner[2]["labels"]["assignment_id"] != receipt["assignment_id"]):
+            receipt.update(state="CANCELLED", reason="stale_authority", completed_at=utc_timestamp())
+            bump_revision(lease)
+            return dict(receipt)
+        workflow.require_callback_idle(lease)
+        receipt.update(state="SENDING", attempt_id=uuid.uuid4().hex, started_at=utc_timestamp())
+        bump_revision(lease)
+        attempt = receipt["attempt_id"]
+    # SENDING is durable before I/O. Registry writers fence only this lease.
+    try:
+        response = upstream_call("human", {
+            "jsonrpc": "2.0", "id": key, "method": "tools/call",
+            "params": {"name": "send_agent_prompt", "arguments": {
+                "agentId": payload["recipient_id"], "background": True, "notifyOnFinish": False,
+                "activeTurnBehavior": "steer",
+                "prompt": f"[Room callback relay]\nMessage: {key}\nPeer: {payload['agent_id']}\nAssignment: {payload['assignment_id']}\nWork epoch: {payload['work_epoch']}\nTransport receipt only; review and settle explicitly.\n\n{payload['handback']}",
+            }},
+        }, agent_scoped=False)
+        state = {"delivered": "DELIVERED", "rejected": "REJECTED"}.get(delivery_response_status(response), "UNCERTAIN")
+    except (OSError, RuntimeError):
+        state = "UNCERTAIN"
+    with locked_leases(callback_write=(workspace, key)) as registry:
+        lease = registry["leases"][workspace]
+        stored = lease["callback_deliveries"][key]
+        if stored.get("attempt_id") != attempt or stored.get("state") != "SENDING":
+            raise workflow.WorkflowError("Callback send reservation changed; Human inspection required")
+        stored.update(state=state, completed_at=utc_timestamp())
+        bump_revision(lease)
+        append_history(lease, "relay_peer_callback", payload["agent_id"], "callback-service", key, state)
+        return dict(stored)
+
+
+def relay_room_callback(peer_id: str) -> dict[str, Any]:
+    # Existing bindings may still have old long-lived proxy processes. Keep
+    # their original transport/locking contract until a fresh bind checkpoint.
+    with locked_leases() as registry:
+        peer = load_agent_record(peer_id)
+        lease = lead_lease(registry, peer.get("labels", {}).get("paseo.parent-agent-id")) if peer else None
+        version = lease.get("callback_outbox_version", 1) if lease else 2
+        if type(version) is not int or version not in {1, 2}:
+            raise workflow.WorkflowError("Unsupported callback outbox version; checkpoint required")
+        legacy = lease is not None and version == 1
+    if legacy:
+        return legacy_relay_room_callback(peer_id)
+    with callback_process_lock(peer_id) as acquired:
+        if not acquired:
+            return {"state": "BUSY", "agent_id": peer_id}
+        recover_interrupted_callback(peer_id)
+        # Flush saved READY payloads before reading any mutable timeline, even
+        # when authority is now stale (the sender marks them CANCELLED).
+        with read_locked_leases() as registry:
+            ready = [(workspace, key) for workspace, lease in registry["leases"].items()
+                     for key, item in lease.get("callback_deliveries", {}).items()
+                     if item.get("agent_id") == peer_id and item.get("state") == "READY"]
+        if ready:
+            result = None
+            for workspace, key in ready:
+                result = deliver_callback_outbox(workspace, key)
+            return result
+        with locked_leases() as registry:
+            owner = callback_owner(registry, peer_id)
+            if owner is None:
+                return {"state": "IGNORED", "agent_id": peer_id}
+            lease, lead, peer = owner
+            epoch, assignment = lease["work_epoch"], peer["labels"]["assignment_id"]
+            lead_id, workspace = lead["id"], lease["workspace_id"]
+            for prior in lease.get("callback_deliveries", {}).values():
+                if (prior.get("work_epoch") == epoch and prior.get("assignment_id") == assignment
+                        and prior.get("agent_id") == peer_id and prior.get("state") == "UNCERTAIN"):
+                    return dict(prior)  # New activity never permits an ambiguous resend.
+        status = structured_content(upstream_tool_call(lead_id, "relay-status", "get_agent_status", {"agentId": peer_id}))
+        activity = structured_content(upstream_tool_call(lead_id, "relay-activity", "get_agent_activity", {"agentId": peer_id, "limit": 8}))
+        if status is None or activity is None:
+            raise workflow.WorkflowError("Callback evidence is unavailable; no notification sent")
+        if status.get("status") not in {"idle", "error", "closed"}:
+            return {"state": "WAITING", "agent_id": peer_id}
+        count = activity.get("updateCount")
+        if type(count) is not int or count < 1:
+            raise workflow.WorkflowError("Callback activity counter is invalid")
+        outcome, message = peer_terminal_handback(status, activity) or (
+            "NEEDS_LEAD_DECISION", "Task outcome: NEEDS_LEAD_DECISION\n\nEnded turn has no usable current handback; inspect its activity. No success is inferred.")
+        key = digest_payload({"peer": peer_id, "epoch": epoch, "assignment": assignment, "activity": count})
+        payload = {"message_id": key, "agent_id": peer_id, "recipient_id": lead_id,
+                   "work_epoch": epoch, "assignment_id": assignment, "outcome": outcome, "handback": message}
+        if len(json.dumps(payload).encode()) > 65536:
+            raise workflow.WorkflowError("Callback handback exceeds 64 KiB; no truncated payload was saved")
+        receipt = {**{k: v for k, v in payload.items() if k != "handback"}, "version": 2,
+                   "state": "READY", "activity_update_count": count, "payload": payload,
+                   "payload_digest": digest_payload(payload), "evidence_digest": digest_payload(message),
+                   "recorded_at": utc_timestamp()}
+        with locked_leases() as registry:
+            owner = callback_owner(registry, peer_id)
+            if not owner or owner[0]["work_epoch"] != epoch or owner[2]["labels"]["assignment_id"] != assignment:
+                return {"state": "IGNORED", "agent_id": peer_id}
+            lease = owner[0]
+            receipts = lease.setdefault("callback_deliveries", {})
+            if key in receipts:
+                return dict(receipts[key])  # Legacy receipts stay unchanged, never replayed.
+            if len(receipts) >= 256:
+                raise workflow.WorkflowError("Callback evidence window is full; Human checkpoint required")
+            receipts[key] = receipt
+            bump_revision(lease)
+        return deliver_callback_outbox(workspace, key)
+
+
 def reconcile_room_callbacks() -> dict[str, Any]:
     with read_locked_leases() as registry:
         ids = []
         for lease in registry["leases"].values():
+            ids.extend(item["agent_id"] for item in lease.get("callback_deliveries", {}).values()
+                       if item.get("state") in {"READY", "SENDING"})
             if lease.get("state") == "active" and lease.get("decision_state") == "WORKING":
                 ids.extend(lease.get("peer_briefs", {}))
         ids = list(dict.fromkeys(ids))
@@ -3094,13 +3273,61 @@ def reconcile_room_callbacks() -> dict[str, Any]:
             raise workflow.WorkflowError("Startup callback reconciliation exceeds its 64-assignment bound")
     results = []
     for peer_id in ids:
-        peer = load_agent_record(peer_id)
-        if peer and peer.get("labels", {}).get("callback_transport") == CALLBACK_TRANSPORT:
-            try:
-                results.append(relay_room_callback(peer_id))
-            except (OSError, RuntimeError) as error:
-                results.append({"agent_id": peer_id, "state": "BLOCKED", "reason": str(error)})
+        try:
+            result = relay_room_callback(peer_id)
+            if result.get("state") != "IGNORED":
+                results.append(result)
+        except (OSError, RuntimeError, workflow.WorkflowError) as error:
+            results.append({"agent_id": peer_id, "state": "BLOCKED", "reason": str(error)})
     return {"callbacks": results}
+
+
+def resolve_callback_delivery(arguments: dict[str, Any], *, apply: bool = False,
+                              role: str = "human") -> dict[str, Any]:
+    """Owner-only evidence/CAS resolution; RETRY is a separate explicit action."""
+    required = {"leadAgentId", "messageId", "resolution", "evidence", "expectedWorkEpoch", "expectedRevision"}
+    if (role != "human" or set(arguments) != required
+            or arguments.get("resolution") not in {"DELIVERED", "NOT_DELIVERED", "RETRY"}
+            or not isinstance(arguments.get("evidence"), str) or not arguments["evidence"].strip()):
+        raise workflow.WorkflowError("Callback resolution requires Human authority and exact evidence/CAS fields")
+    with read_locked_leases() as registry:
+        lease = lead_lease(registry, arguments["leadAgentId"])
+        item = lease.get("callback_deliveries", {}).get(arguments["messageId"]) if lease else None
+        if not isinstance(item, dict):
+            raise workflow.WorkflowError("Unknown callback receipt")
+        peer_id, workspace = item["agent_id"], lease["workspace_id"]
+    with callback_process_lock(peer_id) as acquired:
+        if not acquired:
+            raise workflow.WorkflowError("Callback sender is still active; resolution must wait")
+        with locked_leases(callback_write=(workspace, arguments["messageId"])) as registry:
+            lease = lead_lease(registry, arguments["leadAgentId"])
+            if not lease or not expected_version_matches(lease, arguments["expectedWorkEpoch"], arguments["expectedRevision"]):
+                raise workflow.WorkflowError("Callback resolution has stale epoch/revision")
+            item = lease["callback_deliveries"][arguments["messageId"]]
+            if item.get("work_epoch") != lease["work_epoch"]:
+                raise workflow.WorkflowError("Callback resolution is fenced to its work epoch")
+            resolution = arguments["resolution"]
+            if resolution == "RETRY":
+                callback_payload(item, arguments["messageId"])
+                owner = callback_owner(registry, peer_id)
+                if (item.get("state") != "REJECTED" or not owner
+                        or owner[2]["labels"]["assignment_id"] != item["assignment_id"]):
+                    raise workflow.WorkflowError("Retry requires definitively rejected delivery and current assignment")
+                next_state = "READY"
+            else:
+                if item.get("state") not in {"UNCERTAIN", "SENDING"}:
+                    raise workflow.WorkflowError("Only ambiguous callbacks need Human delivery resolution")
+                next_state = "DELIVERED" if resolution == "DELIVERED" else "REJECTED"
+            if not apply:
+                return {"applied": False, "message_id": arguments["messageId"], "next_state": next_state}
+            item.setdefault("resolutions", []).append({"actor": "human", "resolution": resolution,
+                "evidence": arguments["evidence"].strip(), "at": utc_timestamp()})
+            item.update(state=next_state, completed_at=utc_timestamp())
+            bump_revision(lease)
+        # A RETRY is explicit; NOT_DELIVERED never itself resends.
+        if resolution == "RETRY":
+            item = deliver_callback_outbox(workspace, arguments["messageId"])
+        return {"applied": True, "receipt": item}
 
 
 def recover_peer_callbacks(
@@ -3663,6 +3890,8 @@ def recover_working_lead(
                     "prompt": prompt.strip(),
                     "background": True,
                     "notifyOnFinish": False,
+                    # Recovery replaces a stalled turn rather than joining it.
+                    "activeTurnBehavior": "interrupt",
                 },
             },
         },

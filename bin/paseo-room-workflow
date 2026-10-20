@@ -56,8 +56,10 @@ def main() -> int:
     observations.add_argument("--lead-id", required=True)
     task_list = commands.add_parser("tasks", help="read current task graph, reservations and executor receipts")
     task_list.add_argument("--lead-id", required=True)
+    outbox = commands.add_parser("callback-outbox", help="read saved handbacks and delivery receipts")
+    outbox.add_argument("--lead-id", required=True)
     for name in ("decide", "reopen", "resolve", "archive", "withdraw", "answer-ask",
-                 "authorize-peer-steering", "steer-peer", "resolve-peer-steering", "resolve-check", "rebind-runtime"):
+                 "authorize-peer-steering", "steer-peer", "resolve-peer-steering", "resolve-check", "rebind-runtime", "resolve-callback"):
         operation = commands.add_parser(name, help="protected Human operation; dry-run by default")
         operation.add_argument("request", type=pathlib.Path, help="JSON arguments copied from the current queue")
         operation.add_argument("--apply", action="store_true")
@@ -70,6 +72,12 @@ def main() -> int:
             raise workflow.WorkflowError("Callback service invocation is required")
         proxy = proxy_module()
         result = proxy.relay_room_callback(args.agent_id) if args.command == "callback" else proxy.reconcile_room_callbacks()
+        # Service responses are receipts, not copies of every saved handback.
+        if args.command == "callback":
+            result = {key: value for key, value in result.items() if key != "payload"}
+        else:
+            result["callbacks"] = [{key: value for key, value in item.items() if key != "payload"}
+                                   for item in result["callbacks"]]
     elif args.command == "snapshot":
         result = workflow.snapshot(args.repository)
     elif args.command == "init":
@@ -137,9 +145,16 @@ def main() -> int:
                 if not lease:
                     raise workflow.WorkflowError("No active managed Lead")
                 result = {"work_epoch": lease["work_epoch"], "revision": lease["revision"], **room_tasks.epoch_state(lease)}
+        elif args.command == "callback-outbox":
+            with proxy.read_locked_leases() as registry:
+                lease = proxy.lead_lease(registry, args.lead_id)
+                if not lease:
+                    raise workflow.WorkflowError("No active managed Lead")
+                result = {"work_epoch": lease["work_epoch"], "revision": lease["revision"],
+                          "messages": lease.get("callback_deliveries", {})}
         elif args.command == "bindings":
             with proxy.read_locked_leases() as registry:
-                fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "execution_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest", "runtime_binding_version", "runtime_binding")
+                fields = ("workspace_id", "lead_agent_id", "supervisor_agent_id", "authority_mode", "execution_mode", "state", "decision_state", "task_class", "work_epoch", "revision", "workflow_digest", "candidate_digest", "runtime_binding_version", "runtime_binding", "callback_outbox_version")
                 result = {"bindings": [{key: lease.get(key) for key in fields} for lease in registry["leases"].values()]}
         else:
             request = json.loads(args.request.read_text())
@@ -147,6 +162,8 @@ def main() -> int:
                 raise workflow.WorkflowError("Request must be a JSON object")
             if args.command == "rebind-runtime":
                 result = proxy.rebind_runtime(request, apply=args.apply)
+            elif args.command == "resolve-callback":
+                result = proxy.resolve_callback_delivery(request, apply=args.apply)
             elif args.command == "withdraw":
                 result = proxy.withdraw_binding(request, apply=args.apply)
             elif args.command == "resolve-check":

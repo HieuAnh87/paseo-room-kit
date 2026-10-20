@@ -65,7 +65,7 @@ Requested resolution (nếu có)
 
 Sau khi tất cả Peer callback cần thiết đã được resolve và evidence đã được validate, Lead gọi tool hẹp `handback_to_parent` đúng một lần. Lead truyền report và candidateDigest khi gated; proxy resolve governance từ authority binding, hoặc ghi receipt trong Human queue ở direct mode và không lộ parent ID cho Lead.
 
-Điều này cần explicit vì `notifyOnFinish` gắn với từng create/prompt turn. Callback Peer tạo một turn mới cho Lead, nhưng turn đó không kế thừa callback của turn Lead ban đầu lên Supervisor. `handback_to_parent` khép chuỗi mà không poll, heartbeat hoặc generic upward messaging.
+Điều này cần explicit vì `notifyOnFinish` gắn với từng create/prompt turn. Callback Peer tạo một turn mới cho Lead (hoặc steer vào turn đang chạy), nhưng không kế thừa callback của turn Lead ban đầu lên Supervisor. `handback_to_parent` khép chuỗi mà không poll, heartbeat hoặc generic upward messaging.
 
 Nếu expected Peer callback không render, Lead dùng `recover_peer_callbacks`
 một lần. Proxy đọc durable Paseo status/activity, kiểm tra exact
@@ -73,6 +73,15 @@ parent/workspace/current epoch và lưu terminal message + digest receipt trong
 lease. Lần gọi sau trả receipt đã lưu thay vì đọc activity lại.
 
 Lead báo material uncertainty, ownership collision, product trade-off hoặc vấn đề vượt authority trong report này. Lead không tự mở direct Human chat.
+
+### Gửi vào turn đang chạy
+
+Từ Paseo 0.12.0, `send_agent_prompt` nhận `activeTurnBehavior`: `steer` nhập vào turn đang chạy, `interrupt` thay thế turn đó. Mặc định là steer cho lệnh gọi agent-scoped và interrupt cho lệnh gọi top-level. Proxy ghim giá trị rõ ràng để hành vi không phụ thuộc đường gọi:
+
+- callback relay (legacy và outbox), handback, reopen, Human steering: `steer`, không cắt ngang việc Lead/Supervisor đang làm;
+- `recover_working_lead`: `interrupt`, vì recovery thay turn bị kẹt.
+
+Nếu provider không hỗ trợ steer, Paseo tự fallback sang interrupt. Bản 0.11.x bỏ qua tham số này. Proxy vẫn gửi `background: true` vì trên 0.11.x lệnh gọi top-level không có cờ này sẽ chờ turn kết thúc.
 
 ## Finish/error/permission
 
