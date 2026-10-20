@@ -27,6 +27,7 @@ class CallbackTest(unittest.TestCase):
         self.assertEqual(len(sends),1); self.assertEqual(sends[0]['agentId'],f.LEAD_ID)
         self.assertFalse(sends[0]['notifyOnFinish']); self.assertIn('Task outcome: DONE',sends[0]['prompt'])
         self.assertTrue(sends[0]['background'])
+        self.assertEqual(sends[0]['activeTurnBehavior'],'steer')
         self.assertEqual(self.m.relay_room_callback(f.PEER_ID)['state'],'DELIVERED')
         self.assertEqual(len([x for x in self.fx.calls if x[1]=='send_agent_prompt']),1)
         lease=self.fx.read_lease(); self.assertEqual(lease['decision_state'],'WORKING')
@@ -264,6 +265,8 @@ class CallbackTest(unittest.TestCase):
         self.assertEqual(result['state'], 'DELIVERED')
         self.assertNotIn('payload', result)
         self.assertNotIn('callback_outbox_version', self.fx.read_lease())
+        [send] = [a for _, name, a in self.fx.calls if name == 'send_agent_prompt']
+        self.assertEqual(send['activeTurnBehavior'], 'steer')
 
     def test_resolution_cannot_race_active_sender(self):
         saved = self.save_ready()

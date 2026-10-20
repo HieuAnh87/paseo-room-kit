@@ -1457,7 +1457,8 @@ def steer_room_peer(agent_id: str, role: str, request_id: Any, arguments: dict[s
             delivery_actor = lead_id if stage == "PEER" else agent_id
             response = upstream_call(delivery_actor, {"jsonrpc": "2.0", "id": correlation, "method": "tools/call",
                 "params": {"name": "send_agent_prompt", "arguments": {"agentId": target, "prompt": prompt,
-                           "background": True, "notifyOnFinish": stage == "PEER"}}},
+                           "background": True, "notifyOnFinish": stage == "PEER",
+                           "activeTurnBehavior": "steer"}}},
                 agent_scoped=stage == "PEER" or role != "human", allow_unscoped_fallback=stage != "PEER")
             status = delivery_response_status(response)
             if isinstance(response, dict) and response.get("id") != correlation:
@@ -2202,6 +2203,7 @@ def handback_to_parent(
                         "prompt": f"Final Lead handback (work epoch {epoch}, candidate {candidate_digest or 'legacy-unbound'}):\n\n{message.strip()}",
                         "background": True,
                         "notifyOnFinish": False,
+                        "activeTurnBehavior": "steer",
                     },
                 },
             },
@@ -2508,6 +2510,7 @@ def reopen_work_epoch(
                     "prompt": prompt.strip(),
                     "background": True,
                     "notifyOnFinish": False,
+                    "activeTurnBehavior": "steer",
                 },
             },
             },
@@ -3077,7 +3080,7 @@ def legacy_relay_room_callback(peer_id: str) -> dict[str, Any]:
             response = upstream_call("human", {
                 "jsonrpc": "2.0", "id": "relay-delivery", "method": "tools/call",
                 "params": {"name": "send_agent_prompt", "arguments": {
-                    "agentId": lead_id, "background": True, "notifyOnFinish": False,
+                    "agentId": lead_id, "background": True, "notifyOnFinish": False, "activeTurnBehavior": "steer",
                     "prompt": f"[Room callback relay]\nPeer: {peer_id}\nAssignment: {assignment}\nWork epoch: {epoch}\nTransport receipt only; review and settle explicitly.\n\n{message}",
                 }},
             }, agent_scoped=False)
@@ -3166,6 +3169,7 @@ def deliver_callback_outbox(workspace: str, key: str) -> dict[str, Any]:
             "jsonrpc": "2.0", "id": key, "method": "tools/call",
             "params": {"name": "send_agent_prompt", "arguments": {
                 "agentId": payload["recipient_id"], "background": True, "notifyOnFinish": False,
+                "activeTurnBehavior": "steer",
                 "prompt": f"[Room callback relay]\nMessage: {key}\nPeer: {payload['agent_id']}\nAssignment: {payload['assignment_id']}\nWork epoch: {payload['work_epoch']}\nTransport receipt only; review and settle explicitly.\n\n{payload['handback']}",
             }},
         }, agent_scoped=False)
@@ -3886,6 +3890,8 @@ def recover_working_lead(
                     "prompt": prompt.strip(),
                     "background": True,
                     "notifyOnFinish": False,
+                    # Recovery replaces a stalled turn rather than joining it.
+                    "activeTurnBehavior": "interrupt",
                 },
             },
         },

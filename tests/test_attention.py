@@ -553,6 +553,7 @@ class AttentionTest(unittest.TestCase):
         self.assertTrue(self.sends[1][2]["notifyOnFinish"])
         self.assertFalse(self.sends[0][2]["notifyOnFinish"])
         self.assertIn("does not widen write scope", self.sends[1][2]["prompt"])
+        self.assertEqual([args["activeTurnBehavior"] for _, _, args in self.sends], ["steer", "steer"])
         self.result(self.steer())
         self.assertEqual(len(self.sends), 2)
         self.assertEqual(self.fallbacks, [True, False])
