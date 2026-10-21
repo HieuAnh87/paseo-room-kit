@@ -5,7 +5,7 @@ Ngày thay đổi: 13/10/2026. Xem [routing](03-provider-routing.md) và [workfl
 ## Model và effort
 
 - Lead Sol/Opus giữ High, XHigh (default), Max; giữ nguyên effort hợp lệ được chọn.
-- Peer có Luna (default) và Sol, mỗi model có High (default), XHigh, Max. `impl_deep` dùng Sol; `impl`, `search`, `research`, `ui` dùng Luna.
+- Peer có Luna (default) và Sol, mỗi model có High (default), XHigh, Max. `impl_deep` dùng Sol; `impl`, `search`, `research` dùng Luna.
 - Supervisor Sol/Opus mặc định High; vẫn chọn được XHigh. Reviewer Opus High và Watcher Luna Medium giữ nguyên.
 - Research/UI dùng provider Codex Peer đang bật. Các adapter AI Box/Gemini đang tắt trên host; không bật lại chúng qua thay đổi này.
 - Đây là routing và lựa chọn, chưa phải benchmark chất lượng/cost. Không thay model/effort của session đang chạy hoặc suy catalog là chứng nhận model inference thực tế.

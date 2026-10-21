@@ -56,7 +56,9 @@ export function startRelay(server: PluginServerContext, services: Services = loc
   const remove = server.on("agent.turn_ended", async ({agent}) => {
     // The event snapshot has no labels. The owner CLI validates canonical
     // labels, native binding, epoch and assignment; it chooses the recipient.
-    if (!/(?:-peer|-reviewer)$/.test(agent.provider.split("/")[0] ?? "") || !/^[0-9a-f-]{36}$/i.test(agent.id)) return;
+    const provider = agent.provider.split("/")[0] ?? "";
+    const uiProvider = provider === "antigravity-cli" || provider === "claude-ui";
+    if ((!uiProvider && !/(?:-peer|-reviewer)$/.test(provider)) || !/^[0-9a-f-]{36}$/i.test(agent.id)) return;
     for (const delay of [100, 500, 1500]) {
       await services.delay(delay);
       if (closed) return;

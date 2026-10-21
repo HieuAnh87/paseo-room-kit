@@ -3,11 +3,12 @@
     "impl": "codex-peer/gpt-6-luna",
     "impl_deep": "codex-peer/gpt-6.1-sol",
     "search": "codex-peer/gpt-6-luna",
-    "ui": "codex-peer/gpt-6-luna",
+    "ui": "antigravity-cli/gemini-3.8-flash",
     "research": "codex-peer/gpt-6-luna",
     "planning": "codex-lead/gpt-6.1-sol",
     "planning_claude": "claude-lead/claude-opus-5-5",
-    "audit": "claude-reviewer/claude-opus-5-5"
+    "audit": "claude-reviewer/claude-opus-5-5",
+    "ui_opus": "claude-ui/claude-opus-5-5"
   },
   "preferences": [
     "The human-facing Supervisor autonomously selects planning or planning_claude for each new bounded objective. Honor an explicit Human provider choice; otherwise use planning when neither route has a clear task advantage. Never create that Lead with a stock provider.",
@@ -16,14 +17,16 @@
     "Use planning with lead_profile=stable for Codex Lead or planning_claude with lead_profile=claude for Claude Lead. Select once before creation, pin the route for that work epoch, and never switch an active Lead's provider in place.",
     "The Claude Lead uses Opus 5.5 at XHigh thinking with a 300000-token auto-compact window. Treat its 1M context as headroom, not a target working set.",
     "One Lead owns one bounded objective/workstream in one workspace. Keep follow-ups within its work epoch protocol; create a separate isolated workspace for an independent objective only when write scopes do not overlap, otherwise serialize.",
-    "The Lead must use the impl, impl_deep, search, research, or ui provider preference when creating a bounded Peer; never create an internal Peer with the stock codex provider.",
-    "Use GPT-6 Luna High by default for impl, search, research and ui. Use GPT-6.1 Sol High by default for impl_deep. Both Peer models offer High, XHigh and Max; preserve an explicitly selected supported effort. Use Claude Opus 5.5 High as a fresh read-only Reviewer on audit.",
+    "The Lead must use the impl, impl_deep, search, research, ui, or ui_opus provider preference when creating a bounded Peer; never create an internal Peer with the stock codex provider.",
+    "Use GPT-6 Luna High by default for impl, search and research. Use GPT-6.1 Sol High by default for impl_deep. Both Peer models offer High, XHigh and Max; preserve an explicitly selected supported effort. Use Claude Opus 5.5 High as a fresh read-only Reviewer on audit.",
     "Direct rg/GitNexus calls stay inside the current agent and do not spawn another model.",
-    "The ui and research routes currently use the enabled codex-peer provider. Give research/scout work an inspection-only assignment. Gemini UI and AI Box Peer remain disabled; do not silently route to those providers or stock providers.",
     "DeepSeek V4 Flash and GLM 5.2 on the AI Box provider are configured with Max thinking; do not invent an unsupported no-thinking option for them.",
     "Verify the created agent's provider and model immediately after creation. If it is a stock provider or the wrong role provider, stop and report the routing error instead of continuing the chain.",
     "Codex and Claude Leads offer High, XHigh (default) and Max thinking. Preserve an explicitly selected supported level; pin that effort for the work epoch.",
-    "For new Human root bindings choose LP by default, L only when repository gates permit tiny/read-only self-work, or SLP when separate governance is needed. Select once at the Human binding checkpoint; never rewrite an active lease or change provider/effort to switch topology. Supervisor-created Lead leases remain SLP."
+    "For new Human root bindings choose LP by default, L only when repository gates permit tiny/read-only self-work, or SLP when separate governance is needed. Select once at the Human binding checkpoint; never rewrite an active lease or change provider/effort to switch topology. Supervisor-created Lead leases remain SLP.",
+    "Use ui with Antigravity Gemini 3.8 Flash High by default for UI design and implementation. Use ui_opus with Claude Opus 5.5 High only on Human request or a deliberate Lead choice recorded in labels.ui_choice_reason. Never silently fall back or use Codex for UI.",
+    "Both UI routes are bounded engineering Peers, not independent Reviewers. Give exact frontend scope and visual acceptance checks. UI Peers must not delegate or change backend contracts outside their scope. Research remains codex-peer; legacy gemini-ui ACP and AI Box remain disabled.",
+    "If a UI provider is unavailable, stop and report evidence. Do not create another agent or switch model as automatic recovery."
   ],
   "execution_modes": {
     "default_root_binding": "LP",

@@ -63,3 +63,7 @@ paseo-room-workflow init /path/to/project --apply
 Review `.orchestration/workspace-protocol.md` and `workflow.json` before binding an existing root Lead. Preview with `paseo-room-workflow bind --lead-id LEAD_ID --task-class bounded`, then add `--apply`. Add `--supervisor-id SUPERVISOR_ID` for an independent observer; neither form reparents agents. The compatible Supervisor-created Lead path remains available.
 
 `bindings` shows authority versions; `decisions` shows Human choices. `decide`, `reopen`, `resolve`, `archive` and `withdraw` take a JSON request and preview unless `--apply` is supplied. Common gates bind protocol, runtime metadata, report correlation and review candidate across providers. No repository policy preserves legacy behavior; initialize it before binding to enable candidate gates. See [workflow protocol](protocols/WORKFLOW_PROTOCOL.md) for schemas and limits.
+
+## UI specialists
+
+UI defaults to `antigravity-cli/gemini-3.8-flash` High. Install the Antigravity CLI provider plugin separately and verify its live catalog before dispatch; this kit only configures it. `ui_opus` selects `claude-ui/claude-opus-5-5` High with a non-empty `ui_choice_reason`. Both are engineering Peers; the independent Claude Reviewer remains read-only. No automatic provider fallback. Antigravity tool/subagent boundaries are cooperative assignment rules, not the deterministic Claude hooks or OS isolation.

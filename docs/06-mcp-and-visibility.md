@@ -19,7 +19,7 @@ Paseo daemon có:
 
 Paseo `0.9.1` hỗ trợ policy theo provider qua
 `agents.providers.<id>.paseoTools`. Canonical config vừa giữ
-`injectIntoAgents=false`, vừa đặt `paseoTools.enabled=false` cho cả chín
+`injectIntoAgents=false`, vừa đặt `paseoTools.enabled=false` cho các
 internal custom providers. Vì vậy nếu global injection vô tình bật về sau,
 những provider này vẫn không nhận native unrestricted catalog.
 
@@ -71,3 +71,5 @@ Chi tiết command/env thật chỉ đọc từ config local có kiểm soát. [
 ## Vì sao codebase search không nhất thiết spawn model?
 
 `rg`, GitNexus hoặc MCP call là tool execution trong agent hiện tại. Chỉ khi Lead tạo một delegated `search` Peer thì GPT-6 Luna Medium mới là model riêng. Đây là lý do routing docs tách “direct search” và “delegated search”.
+
+UI providers `antigravity-cli` and `claude-ui` also disable native Paseo tools. Antigravity uses its installed provider plugin and own tool permissions; its assignment constraints are cooperative, not an OS sandbox or enforced ban on its native subagents. Claude UI uses a separate writable Peer profile; Claude Reviewer remains read-only.

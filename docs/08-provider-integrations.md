@@ -47,7 +47,9 @@ mọi delegation qua Paseo. Claude Lead dùng biến `CLAUDE_CODE_AUTO_COMPACT_W
 chính thức của Claude Code để giới hạn active window ở 300K dù model có ceiling
 1M.
 
-## Gemini qua `antigravity-acp`
+## Legacy Gemini qua `antigravity-acp`
+
+Adapter ACP bên dưới đang tắt. UI hiện dùng plugin `antigravity-cli` với Gemini 3.8 Flash High; xem [UI specialists](23-ui-specialists.md). Catalog ACP bên dưới là snapshot cũ, không phải catalog live.
 
 Provider custom:
 

@@ -175,7 +175,7 @@ for role in supervisor lead peer watcher; do
   install_file "${repo_root}/config/codex/${role}.config.toml.tmpl" \
     "${target_home}/.codex/${role}.config.toml" 644 render
 done
-for role in supervisor lead peer watcher; do
+for role in supervisor lead peer watcher ui; do
   for asset in instructions.md settings.json mcp.json; do
     install_file "${repo_root}/config/claude/${role}.${asset}.tmpl" \
       "${target_home}/.config/claude-room/${role}/${asset}" 600 render

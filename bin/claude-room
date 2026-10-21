@@ -5,7 +5,7 @@ role="${1:?room role is required}"
 shift
 
 case "$role" in
-  supervisor|lead|peer|watcher) ;;
+  supervisor|lead|peer|watcher|ui) ;;
   *)
     printf 'unsupported Claude room role: %s\n' "$role" >&2
     exit 2
@@ -16,6 +16,8 @@ claude_bin="${CLAUDE_BIN:-$(command -v claude)}"
 role_root="${HOME}/.config/claude-room/${role}"
 
 export PASEO_ROOM_ROLE="$role"
+# UI has separate writable settings but the same bounded Peer authority.
+[[ "$role" != "ui" ]] || export PASEO_ROOM_ROLE=peer
 export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
 export PATH="${HOME}/.local/share/paseo-room-bin:${PATH}"
 
